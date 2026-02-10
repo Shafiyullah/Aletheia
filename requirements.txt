@@ -1,0 +1,15 @@
+jax
+jaxlib
+networkx
+pypdf2
+streamlit
+streamlit-agraph
+google-genai
+pytest
+pytest-asyncio
+bandit
+pylint
+nest-asyncio
+Pillow
+tenacity
+pdf2image
