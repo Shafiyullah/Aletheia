@@ -13,15 +13,13 @@ class BridgeEngine:
     Translates scientific paper claims/formulas into executable Python code 
     to verify reproducibility.
     """
-    def __init__(self, api_key: Optional[str] = None, demo_mode: bool = False):
+    def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
-        self.is_mock = demo_mode
 
-        if self.api_key and not self.is_mock:
+        if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
         else:
-            if not self.is_mock:
-                logging.warning("GEMINI_API_KEY not found. Bridge disabled.")
+            logging.warning("GEMINI_API_KEY not found. Bridge disabled.")
             self.client = None
 
     async def _safe_generate_content(self, model: str, contents: Any, config: Optional[Dict] = None):
@@ -59,13 +57,6 @@ class BridgeEngine:
         3. Execute in Sandbox.
         4. Verify Result.
         """
-        if self.is_mock:
-             return {
-                "extracted_code": "# [DEMO] Bridge Reproduction\nimport numpy as np\n\ndef demo_simulation():\n    # Simulating Attention Mechanism Accuracy\n    return 0.92\n\nprint(f'Accuracy: {demo_simulation()}')",
-                "execution_result": "Accuracy: 0.92\n",
-                "status": "Verified (92% matches Claim)"
-            }
-
         if not self.client:
             return {"error": "Gemini Client not initialized."}
 

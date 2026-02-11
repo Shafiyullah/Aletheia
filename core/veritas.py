@@ -1,5 +1,7 @@
 import logging
 import asyncio
+import json
+import os
 from typing import List, Dict, Any, Tuple, Optional
 import PyPDF2
 from google import genai
@@ -8,20 +10,22 @@ from core.safety import run_in_sandbox, SecurityViolationException
 from core.async_utils import retry_api_call
 
 class VeritasAuditor:
-    def __init__(self, api_key: Optional[str] = None, demo_mode: bool = False):
-        import os # Ensure os is imported locally if needed, though file has it
+    def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
-        self.is_mock = demo_mode
 
-        if self.api_key and not self.is_mock:
+        if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
         else:
             self.client = None
+            logging.warning("GEMINI_API_KEY not found. Veritas Audit will fail.")
 
     async def _safe_generate_content(self, model: str, contents: Any, config: Optional[Dict] = None):
         """
         Helper wrapper to handle Rate Limits (429) by falling back to Flash.
         """
+        if not self.client:
+             raise ValueError("Gemini Client not initialized.")
+
         try:
             return await self.client.aio.models.generate_content(
                 model=model,
@@ -60,14 +64,6 @@ class VeritasAuditor:
         2. Extract Citations.
         3. Verify Claims against Citations.
         """
-        if self.is_mock:
-            return [{
-                "claim": "[DEMO] The Earth is Flat.",
-                "citation": "Ancient Maps (1500)",
-                "verification": "NO",
-                "evidence": "[DEMO] Satellite imagery confirms spherical shape."
-            }]
-
         if not self.client:
             return [{"error": "Gemini Client not initialized."}]
 
@@ -181,4 +177,3 @@ class VeritasAuditor:
         elif "```" in text:
             return text.split("```")[1].split("```")[0].strip()
         return text.strip()
-import json # Added missing import

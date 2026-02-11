@@ -1,5 +1,3 @@
-import os
-
 # TIER 1: THE SCANNER (Fast, Cheap, 1M+ Context)
 # Use this for: Dependency Graphs, File Parsing, "Blast Radius" calculation.
 MODEL_FAST = "gemini-3-flash-preview"

@@ -45,7 +45,8 @@ class VisionParser:
                 raise ImportError("Poppler is not installed or not in PATH. Please install Poppler.")
             raise e
 
-    async def extract_features_with_vision(self, images: List[Image.Image]) -> str:
+
+    async def extract_features_with_vision(self, images: List[Image.Image], optimize_scanning: bool = True) -> str:
         """
         Sends images to Gemini Vision for transcription using Vision-First approach.
         Optimized for tokens: Scans Abstract (Pg 1) and Conclusion (Last Pg) if > 5 pages.
@@ -58,7 +59,9 @@ class VisionParser:
 
         # Optimization Strategy
         pages_to_process = []
-        if len(images) > 5:
+        status_msg = ""
+        
+        if optimize_scanning and len(images) > 5:
             logging.info(f"PDF has {len(images)} pages. Optimizing: Scanning Page 1 (Abstract) and Last Page (Conclusion).")
             # Create a composite image or list of key pages
             # For this implementation, we'll process them as a list of images provided to the model
@@ -108,10 +111,11 @@ class VisionParser:
                 err_str = str(e)
                 if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                     logging.warning(f"Rate Limit Hit on {MODEL_VISION}. Falling back to Flash...")
-                    st_msg = "**⚠️ Pro API Quota Exceeded. Switched to 'gemini-3-flash-preview' (Faster, Higher Limits).**"
+                    st_msg = "**⚠️ Pro API Quota Exceeded. Switched to configured backup model.**"
                     
-                    # Fallback: Flash Model
-                    fallback_model = "gemini-3-flash-preview"
+                    # Fallback: Flash Model (Reuse MODEL_FAST from config/constants if distinct, but here we assume using MODEL_FAST as fallback)
+                    from core.config import MODEL_FAST
+                    fallback_model = MODEL_FAST
                     try:
                         response = await self.client.aio.models.generate_content(
                             model=fallback_model,
@@ -119,7 +123,7 @@ class VisionParser:
                         )
                         return f"{status_msg}\n\n{st_msg}\n\n{response.text}"
                     except Exception as flash_err:
-                        return f"Error: Both Pro and Flash models failed. {flash_err}"
+                        return f"Error: Both Primary and Backup models failed. {flash_err}"
                 else:
                     raise e # Re-raise if not rate limit
 
@@ -130,13 +134,13 @@ class VisionParser:
 # Standalone helper function for easy import
 vision_parser = VisionParser()
 
-async def parse_research_paper(pdf_bytes: bytes) -> str:
+async def parse_research_paper(pdf_bytes: bytes, optimize_scanning: bool = True) -> str:
     """
     Main entry point: Bytes -> Images -> Transcription
     """
     try:
         images = vision_parser.convert_pdf_to_images(pdf_bytes)
-        transcription = await vision_parser.extract_features_with_vision(images)
+        transcription = await vision_parser.extract_features_with_vision(images, optimize_scanning=optimize_scanning)
         return transcription
     except ImportError as e:
         return f"Configuration Error: {e}"

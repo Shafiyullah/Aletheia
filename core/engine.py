@@ -24,16 +24,14 @@ logging.basicConfig(
 )
 
 class AletheiaEngine:
-    def __init__(self, api_key: Optional[str] = None, demo_mode: bool = False):
+    def __init__(self, api_key: Optional[str] = None):
         self.graph = nx.DiGraph()
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
-        self.is_mock = demo_mode
         
-        if self.api_key and not self.is_mock:
+        if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
         else:
-            if not self.is_mock:
-                logging.warning("GEMINI_API_KEY not found. AI features disabled.")
+            logging.warning("GEMINI_API_KEY not found. AI features disabled.")
             self.client = None
 
     def _extract_code(self, text: str) -> str:
@@ -141,12 +139,7 @@ class AletheiaEngine:
         2. If Security fails, abort immediately.
         3. Route to specialized agent based on classification.
         """
-        if self.is_mock:
-            return json.dumps({
-                "method": "mock_optimization",
-                "code": "# [DEMO] JAX Optimization Applied\nimport jax.numpy as jnp\n\n@jax.jit\ndef optimized_demo(x):\n    return jnp.dot(x, x.T) # 100x Speedup"
-            })
-
+        
         if not self.client:
             return "# Gemini Client not initialized."
 
@@ -201,9 +194,12 @@ class AletheiaEngine:
             result_json = await self.generate_jax_optimization(code_str)
             try:
                 result = json.loads(result_json)
-                if result.get("method") == "fallback":
-                    logging.warning("JAX Optimization failed. Falling back to General Async Refactor.")
-                    # Fall through to general logic
+                if result.get("method") == "fallback" or result.get("method") == "error":
+                    if result.get("method") == "fallback":
+                        logging.warning("JAX Optimization failed. Falling back to General Async Refactor.")
+                        # Fall through to general logic
+                    else:
+                        return result_json
                 else:
                     return result_json
             except json.JSONDecodeError:
@@ -221,9 +217,6 @@ class AletheiaEngine:
         """
         Business Mode: SQL Optimization.
         """
-        if self.is_mock:
-            return "-- [DEMO] SQL Audit: Index Missing on 'user_id'.\nCREATE INDEX idx_user ON users(user_id);"
-
         if not self.client:
             return "-- Gemini Client not initialized."
 

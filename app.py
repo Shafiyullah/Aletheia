@@ -69,10 +69,9 @@ active_key = user_key_input if user_key_input else secret_key
 
 # 3. Auth Logic
 if active_key:
-    # State 1 & 2: Real Key (User or Hosted)
+    # State 1: Real Key (User or Hosted)
     os.environ["GEMINI_API_KEY"] = active_key
     st.session_state['api_key'] = active_key
-    st.session_state['is_mock'] = False
     
     # Visual Feedback
     if user_key_input:
@@ -80,29 +79,19 @@ if active_key:
     else:
         st.sidebar.success("🟢 HOSTED KEY ACTIVE (Full Power)")
         
-    # Initialize Real Engine (if not already set or was mock)
-    # Checks if engine needs reload
-    if 'engine' not in st.session_state or st.session_state.get('demo_mode'): 
+    # Initialize Real Engine (if not already set)
+    if 'engine' not in st.session_state: 
          st.session_state.engine = AletheiaEngine(api_key=active_key)
          st.session_state.veritas = VeritasAuditor(api_key=active_key)
-         st.session_state.bridge = BridgeEngine(api_key=active_key)
-         st.session_state['demo_mode'] = False # Reset mock flag
 
-elif st.sidebar.button("⚡ RUN IN DEMO MODE"):
-    # State 3: Mock Mode
-    st.session_state['is_mock'] = True
-    st.session_state['demo_mode'] = True
-    st.sidebar.info("Simulated Environment Active")
-    
-    # Initialize Mock Engine
-    st.session_state.engine = AletheiaEngine(demo_mode=True)
-    st.session_state.veritas = VeritasAuditor(demo_mode=True)
-    st.session_state.bridge = BridgeEngine(demo_mode=True)
+    # Update engines if key changed
+    st.session_state.engine = AletheiaEngine(api_key=active_key)
+    st.session_state.veritas = VeritasAuditor(api_key=active_key)
 
 # 4. Stop Execution if no valid state
-if not st.session_state.get('api_key') and not st.session_state.get('is_mock'):
+if not st.session_state.get('api_key'):
     st.sidebar.warning("🔒 Auth Required")
-    st.warning("Please enter an API Key or click 'RUN IN DEMO MODE' in the sidebar to proceed.")
+    st.warning("Please enter a Gemini API Key in the sidebar to proceed.")
     st.stop()
 
 navigation = st.sidebar.radio("Active Module", [
