@@ -4,7 +4,9 @@ import ast
 import contextlib
 import os
 import json
-from typing import Tuple, Optional
+import math
+import logging
+from typing import Tuple, Optional, List
 from google import genai
 from core.config import MODEL_FAST
 
@@ -218,4 +220,116 @@ async def ai_security_check_async(code_str: str) -> None:
             raise e
         # If API fails, default to safe (allow regex to catch obvious stuff)
         pass
+
+# --- Deterministic Output Firewall (Zero API calls) ---
+
+_INJECTION_PATTERNS: List[re.Pattern] = [
+    re.compile(r'ignore\s+(all\s+)?previous\s+instructions', re.IGNORECASE),
+    re.compile(r'ignore\s+(all\s+)?above\s+instructions', re.IGNORECASE),
+    re.compile(r'you\s+are\s+now\s+(a|an|in)\s+', re.IGNORECASE),
+    re.compile(r'forget\s+(everything|all|your)\s+(you|above|previous)', re.IGNORECASE),
+    re.compile(r'system\s*prompt\s*:', re.IGNORECASE),
+    re.compile(r'\bDAN\s+mode\b', re.IGNORECASE),
+    re.compile(r'jailbreak', re.IGNORECASE),
+    re.compile(r'act\s+as\s+if\s+you\s+have\s+no\s+(restrictions|rules|guidelines)', re.IGNORECASE),
+    re.compile(r'reveal\s+(the|your)\s+(secret|system|hidden|internal)', re.IGNORECASE),
+    re.compile(r'\[\s*SYSTEM\s*\]', re.IGNORECASE),
+]
+
+_SECRET_PATTERNS: List[re.Pattern] = [
+    re.compile(r'(?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token)\s*[=:]\s*["\']?[A-Za-z0-9_\-]{20,}', re.IGNORECASE),
+    re.compile(r'AIza[0-9A-Za-z_\-]{35}'),
+    re.compile(r'sk-[A-Za-z0-9]{40,}'),
+    re.compile(r'ghp_[A-Za-z0-9]{36,}'),
+    re.compile(r'-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----'),
+    re.compile(r'password\s*[=:]\s*["\'][^"\']+(["\']+)', re.IGNORECASE),
+]
+
+
+def _shannon_entropy(text: str) -> float:
+    """Shannon entropy of a string. High entropy = possibly encoded/encrypted data."""
+    if not text:
+        return 0.0
+    freq = {}
+    for c in text:
+        freq[c] = freq.get(c, 0) + 1
+    length = len(text)
+    return -sum((count / length) * math.log2(count / length) for count in freq.values())
+
+
+def validate_llm_output(output_text: str) -> None:
+    """
+    Deterministic Output Firewall. Zero API calls.
+    
+    Checks:
+      1. Prompt Injection Detection — regex scan for known jailbreak patterns.
+      2. Secret Leak Detection — regex + Shannon entropy for API keys, passwords, 
+         and encoded payloads.
+      3. Code Safety Scan — if the output contains Python code blocks, run them 
+         through the existing AST-based static_analysis_check.
+      4. Structural Validation — if the output is JSON, validate and scan 
+         embedded code fields.
+    
+    Raises SecurityViolationException if any check fails.
+    """
+    violations = []
+
+    # --- Check 1: Prompt Injection Detection ---
+    for pattern in _INJECTION_PATTERNS:
+        match = pattern.search(output_text)
+        if match:
+            violations.append(f"Prompt injection artifact detected: '{match.group()}'")
+
+    # --- Check 2: Secret/Credential Leak Detection ---
+    for pattern in _SECRET_PATTERNS:
+        match = pattern.search(output_text)
+        if match:
+            redacted = match.group()[:10] + "...REDACTED"
+            violations.append(f"Potential credential leak detected: '{redacted}'")
+
+    # Entropy check for encoded payloads
+    for line in output_text.split('\n'):
+        stripped = line.strip()
+        if len(stripped) > 40:
+            entropy = _shannon_entropy(stripped)
+            if entropy > 5.5:  # English ~3.5-4.5; base64/encoded ~5.5+
+                violations.append(
+                    f"High-entropy line detected (entropy={entropy:.2f}), "
+                    f"possible encoded payload: '{stripped[:30]}...'"
+                )
+
+    # --- Check 3: Code Safety Scan ---
+    code_blocks = re.findall(r'```python\s*\n(.*?)```', output_text, re.DOTALL)
+    if not code_blocks:
+        code_blocks = re.findall(r'```\s*\n(.*?)```', output_text, re.DOTALL)
+    for code_block in code_blocks:
+        try:
+            static_analysis_check(code_block)
+        except SecurityViolationException as e:
+            violations.append(f"Embedded code failed AST safety scan: {str(e)}")
+
+    # --- Check 4: Structural Validation ---
+    trimmed = output_text.strip()
+    if trimmed.startswith('{') or trimmed.startswith('['):
+        try:
+            parsed = json.loads(trimmed)
+            if isinstance(parsed, dict) and "code" in parsed:
+                code_content = parsed["code"]
+                if isinstance(code_content, str) and code_content.strip():
+                    try:
+                        static_analysis_check(code_content)
+                    except SecurityViolationException as e:
+                        violations.append(f"Code in JSON payload failed AST safety scan: {str(e)}")
+        except json.JSONDecodeError:
+            logging.warning("Output resembles JSON but failed to parse.")
+
+    # --- Verdict ---
+    if violations:
+        violation_summary = "; ".join(violations)
+        logging.error(f"[OUTPUT FIREWALL] BLOCKED: {violation_summary}")
+        raise SecurityViolationException(
+            f"[FIREWALL BLOCKED] {len(violations)} violation(s) detected: {violation_summary}"
+        )
+    else:
+        logging.info("[OUTPUT FIREWALL] Output passed all checks.")
 

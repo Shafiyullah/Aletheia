@@ -2,7 +2,7 @@ import asyncio
 import logging
 import concurrent.futures
 from typing import Callable, Any, List, Coroutine
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(name)s - %(message)s')
@@ -66,9 +66,14 @@ def retry_api_call():
     Decorator for API calls using exponential backoff.
     Retries on typical transient errors.
     """
+    def is_retryable(exception):
+        """Do not retry on coding errors, only on API/network errors."""
+        non_retryable = (SyntaxError, KeyError, AttributeError, TypeError, NameError, ValueError, ImportError)
+        return not isinstance(exception, non_retryable)
+
     return retry(
-        stop=stop_after_attempt(10),
-        wait=wait_exponential(multiplier=1, min=2, max=60),
-        retry=retry_if_exception_type((Exception)), # Broad catch for demonstration; refine for production (e.g. 429, 503)
+        stop=stop_after_attempt(3), # Reduced from 10 so we don't hang if it's genuinely failing
+        wait=wait_exponential(multiplier=1, min=2, max=10), # Reduced max wait
+        retry=retry_if_exception(is_retryable),
         reraise=True
     )

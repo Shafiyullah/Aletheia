@@ -12,6 +12,7 @@ from google import genai
 from google.genai import types
 from core.safety import SecurityViolationException
 from core.config import MODEL_FAST, MODEL_SMART, MODEL_THINKING, MODEL_CLASSIFY
+from core.utils import extract_code
 
 # Configure logging
 logging.basicConfig(
@@ -34,13 +35,7 @@ class AletheiaEngine:
             logging.warning("GEMINI_API_KEY not found. AI features disabled.")
             self.client = None
 
-    def _extract_code(self, text: str) -> str:
-        """Helper to extract code from markdown."""
-        if "```python" in text:
-            return text.split("```python")[1].split("```")[0].strip()
-        elif "```" in text:
-            return text.split("```")[1].split("```")[0].strip()
-        return text.strip()
+            self.client = None
 
     # --- PROMETHEUS: Code Reactor ---
 
@@ -77,7 +72,7 @@ class AletheiaEngine:
                         model=MODEL_SMART,
                         contents=prompt
                     )
-                    optimized_code = self._extract_code(response.text)
+                    optimized_code = extract_code(response.text)
                     
                     # Step 3: Grounding (Simple Syntax Check)
                     try:
@@ -127,7 +122,7 @@ class AletheiaEngine:
                 model=MODEL_SMART,
                 contents=prompt
             )
-            return self._extract_code(response.text)
+            return extract_code(response.text)
         except Exception as e:
             logging.error(f"Async Refactor Error: {e}")
             return f"# Error: {str(e)}"
@@ -241,7 +236,7 @@ class AletheiaEngine:
                 model=MODEL_SMART,
                 contents=prompt
             )
-            return self._extract_code(response.text)
+            return extract_code(response.text)
         except Exception as e:
             return f"-- Error executing SQL optimization: {e}"
 

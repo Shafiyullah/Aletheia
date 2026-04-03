@@ -2,12 +2,14 @@ import logging
 import asyncio
 import json
 import os
-from typing import List, Dict, Any, Tuple, Optional
+import re
+from typing import List, Dict, Any, Tuple, Optional, Set
 import PyPDF2
 from google import genai
 from core.config import MODEL_SMART, MODEL_FAST
 from core.safety import run_in_sandbox, SecurityViolationException
 from core.async_utils import retry_api_call
+from core.utils import extract_code
 
 class VeritasAuditor:
     def __init__(self, api_key: Optional[str] = None):
@@ -171,9 +173,140 @@ class VeritasAuditor:
                 "confidence": 0.0
             }
 
-    def _extract_code(self, text: str) -> str:
-        if "```python" in text:
-            return text.split("```python")[1].split("```")[0].strip()
-        elif "```" in text:
-            return text.split("```")[1].split("```")[0].strip()
-        return text.strip()
+    # --- Span-Level Verification (Deterministic, No LLM) ---
+
+    @staticmethod
+    def _extract_ngrams(text: str, n: int) -> Set[str]:
+        """Extract character n-grams from text."""
+        text = text.lower()
+        return {text[i:i+n] for i in range(len(text) - n + 1)} if len(text) >= n else {text}
+
+    @staticmethod
+    def _jaccard_similarity(set_a: Set[str], set_b: Set[str]) -> float:
+        """Jaccard similarity between two sets. Returns 0.0-1.0."""
+        if not set_a or not set_b:
+            return 0.0
+        intersection = set_a & set_b
+        union = set_a | set_b
+        return len(intersection) / len(union)
+
+    @staticmethod
+    def _extract_reference_section(source_text: str) -> str:
+        """
+        Extracts the References/Bibliography section from academic text.
+        Falls back to the last 20% of the document if no header is found.
+        """
+        patterns = [
+            r'(?i)\n\s*references\s*\n',
+            r'(?i)\n\s*bibliography\s*\n',
+            r'(?i)\n\s*works\s+cited\s*\n',
+            r'(?i)\n\s*literature\s+cited\s*\n',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, source_text)
+            if match:
+                return source_text[match.start():]
+        cutoff = int(len(source_text) * 0.8)
+        return source_text[cutoff:]
+
+    @staticmethod
+    def _extract_numbers(text: str) -> Set[str]:
+        """Extracts all numerical values and percentages from text."""
+        return set(re.findall(r'\d+(?:\.\d+)?(?:%|x)?', text))
+
+    def span_level_verify(self, claim_results: List[Dict[str, Any]], source_text: str) -> List[Dict[str, Any]]:
+        """
+        Deterministic Span-Level Verification (SLV).
+        
+        Runs three independent checks on each "YES" claim:
+          1. Citation Grounding — Does the cited author/source appear in the
+             document's reference section?
+          2. Claim-Source Overlap — N-gram Jaccard similarity between the claim
+             and actual source text. Catches fabricated language.
+          3. Numerical Anchoring — Do specific numbers/percentages in the claim 
+             exist in the source?
+             
+        Each check produces a 0.0-1.0 score. Combined weighted score below the
+        threshold triggers rejection.
+        """
+        REJECTION_THRESHOLD = 0.15
+        verified_results = []
+
+        # Pre-compute once for all claims
+        normalized_source = " ".join(source_text.split()).lower()
+        source_ngrams = self._extract_ngrams(normalized_source, 4)
+        source_numbers = self._extract_numbers(normalized_source)
+        ref_section = self._extract_reference_section(source_text).lower()
+
+        for res in claim_results:
+            if res.get("verification") != "YES":
+                verified_results.append(res)
+                continue
+
+            claim_text = res.get("claim", "")
+            citation = res.get("citation", "")
+            rejection_reasons = []
+
+            # --- Check 1: Citation Grounding (weight: 0.4) ---
+            citation_score = 0.0
+            if citation and citation != "No citation":
+                common_words = {'the', 'and', 'for', 'from', 'with', 'that', 'this', 'research', 'paper', 'study'}
+                citation_tokens = [
+                    w.strip('().,;:') for w in citation.split()
+                    if len(w.strip('().,;:')) > 2 and w.strip('().,;:').lower() not in common_words
+                ]
+                if citation_tokens:
+                    matched = sum(1 for t in citation_tokens if t.lower() in ref_section)
+                    citation_score = matched / len(citation_tokens)
+                if citation_score < 0.3:
+                    rejection_reasons.append(
+                        f"Citation '{citation}' not found in document references "
+                        f"(match: {citation_score:.0%})"
+                    )
+            else:
+                citation_score = 0.0
+                rejection_reasons.append("No citation provided for a verified claim")
+
+            # --- Check 2: Claim-Source N-gram Overlap (weight: 0.35) ---
+            claim_ngrams = self._extract_ngrams(claim_text.lower(), 4)
+            overlap_score = self._jaccard_similarity(claim_ngrams, source_ngrams)
+            scaled_overlap = min(overlap_score / 0.02, 1.0)
+            if scaled_overlap < 0.3:
+                rejection_reasons.append(
+                    f"Claim language has very low overlap with source text "
+                    f"(Jaccard: {overlap_score:.4f})"
+                )
+
+            # --- Check 3: Numerical Anchoring (weight: 0.25) ---
+            claim_numbers = self._extract_numbers(claim_text)
+            if claim_numbers:
+                anchored = claim_numbers & source_numbers
+                number_score = len(anchored) / len(claim_numbers)
+                if number_score < 0.5:
+                    unanchored = claim_numbers - source_numbers
+                    rejection_reasons.append(
+                        f"Numbers {unanchored} in claim not found in source document"
+                    )
+            else:
+                number_score = 1.0
+
+            # --- Combined Score ---
+            combined = (citation_score * 0.4) + (scaled_overlap * 0.35) + (number_score * 0.25)
+
+            if combined < REJECTION_THRESHOLD:
+                res["verification"] = "NO"
+                res["slv_score"] = round(combined, 3)
+                res["evidence"] = (
+                    f"[SLV REJECTED] (score: {combined:.3f}/{REJECTION_THRESHOLD}). "
+                    f"Reasons: {'; '.join(rejection_reasons)}"
+                )
+                logging.warning(
+                    f"SLV rejected claim: '{claim_text[:60]}...' "
+                    f"(score={combined:.3f}, reasons={rejection_reasons})"
+                )
+            else:
+                res["slv_score"] = round(combined, 3)
+
+            verified_results.append(res)
+
+        return verified_results

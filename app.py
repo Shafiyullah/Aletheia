@@ -7,9 +7,11 @@ import json
 from dataclasses import dataclass
 from core.engine import AletheiaEngine
 from core.veritas import VeritasAuditor
+from core.bridge import BridgeEngine
 from core.vision import extract_images_from_pdf, audit_visual_integrity
 from core.vision_parser import parse_research_paper, VisionParser
 from core.async_utils import async_manager
+from core.safety import validate_llm_output, SecurityViolationException
 from data.demo_repo import DEMO_FILES, DEMO_PDF_CONTENT
 
 # --- Page Config ---
@@ -47,6 +49,8 @@ if "engine" not in st.session_state:
     st.session_state.engine = AletheiaEngine(api_key=os.environ.get("GEMINI_API_KEY"))
 if "veritas" not in st.session_state:
     st.session_state.veritas = VeritasAuditor(api_key=os.environ.get("GEMINI_API_KEY"))
+if "bridge" not in st.session_state:
+    st.session_state.bridge = BridgeEngine(api_key=os.environ.get("GEMINI_API_KEY"))
 
 def add_log(msg):
     st.session_state.logs.append(f"> {msg}")
@@ -83,10 +87,12 @@ if active_key:
     if 'engine' not in st.session_state: 
          st.session_state.engine = AletheiaEngine(api_key=active_key)
          st.session_state.veritas = VeritasAuditor(api_key=active_key)
+         st.session_state.bridge = BridgeEngine(api_key=active_key)
 
     # Update engines if key changed
     st.session_state.engine = AletheiaEngine(api_key=active_key)
     st.session_state.veritas = VeritasAuditor(api_key=active_key)
+    st.session_state.bridge = BridgeEngine(api_key=active_key)
 
 # 4. Stop Execution if no valid state
 if not st.session_state.get('api_key'):
@@ -205,6 +211,11 @@ if navigation == "Step 3: Hyper-Optimize (Prometheus)":
                 result_json = render_neural_logs(asyncio.run, st.session_state.engine.dispatch_optimization(files[selected_file]))
                 
                 try:
+                    # ---> DETERMINISTIC OUTPUT FIREWALL <---
+                    add_log("[FIREWALL] Scanning output for injection/leaks/code violations...")
+                    validate_llm_output(result_json)
+                    add_log("[FIREWALL] Output passed all deterministic checks.")
+
                     result = json.loads(result_json)
                     if result.get("method") == "fallback":
                         st.success("🔄 Switched to Algorithmic Complexity Reducer for better logic flow.")
@@ -212,6 +223,10 @@ if navigation == "Step 3: Hyper-Optimize (Prometheus)":
                     st.session_state.optimized_code = result.get("code", "# Error parsing result.")
                     st.session_state.opt_method = result.get("method", "unknown")
                     add_log("Optimization Complete.")
+                except SecurityViolationException as e:
+                    st.error(f"🚨 {str(e)}")
+                    st.session_state.optimized_code = f"# BLOCK ACTIVATED\n# Reason: {str(e)}"
+                    add_log("Optimization Aborted due to safety collapse.")
                 except json.JSONDecodeError:
                     st.error("Critical Failure: Invalid JSON response from Engine.")
                     st.session_state.optimized_code = result_json
@@ -324,6 +339,15 @@ elif navigation == "Step 1: Audit Paper (Veritas)":
                                         "evidence": "This matches the original CoVe paper published by Meta AI. The 40% reduction figure is accurately cited."
                                     }
                                 ]
+                        
+                        # ---> DETERMINISTIC SPAN-LEVEL VERIFICATION <---
+                        add_log("[SLV] Running deterministic Span-Level Verification...")
+                        audit_results = st.session_state.veritas.span_level_verify(audit_results, text)
+                        slv_rejections = sum(1 for r in audit_results if "[SLV REJECTED]" in r.get("evidence", ""))
+                        if slv_rejections > 0:
+                            add_log(f"[SLV] Rejected {slv_rejections} claim(s) as insufficiently grounded.")
+                        else:
+                            add_log("[SLV] All claims passed grounding checks.")
                     
                     st.session_state.audit_results = audit_results
                     add_log("Audit Protocol Finished.")
@@ -360,6 +384,11 @@ elif navigation == "Step 1: Audit Paper (Veritas)":
                             
                             st.markdown(f"**🔍 Evidence:**")
                             st.write(res.get('evidence', 'No evidence'))
+                            
+                            if 'slv_score' in res:
+                                slv = res['slv_score']
+                                st.markdown(f"**📊 SLV Grounding Score:** `{slv}`")
+                                st.progress(min(slv / 0.5, 1.0))
 
             # --- Vision Forensics ---
             if pdf_file:

@@ -27,3 +27,26 @@ def retry_with_backoff(retries=3, backoff_in_seconds=1):
                     x += 1
         return wrapper
     return decorator
+
+import re
+
+def extract_code(text: str) -> str:
+    """
+    Safely extracts code from a markdown-formatted LLM response.
+    Handles multiple languages, bare code blocks, and lack of markdown.
+    """
+    if not text:
+        return ""
+        
+    # Regex to capture content inside ```language ... ``` or ``` ... ```
+    match = re.search(r'```[a-zA-Z]*\n(.*?)```', text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    
+    # Check if there's an unclosed code block at the end of the text
+    match_unclosed = re.search(r'```[a-zA-Z]*\n(.*)', text, re.DOTALL)
+    if match_unclosed:
+        return match_unclosed.group(1).strip()
+
+    # If no markdown blocks, return text as is (strip leading/trailing space)
+    return text.strip()

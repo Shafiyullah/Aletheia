@@ -6,6 +6,7 @@ from google import genai
 from core.config import MODEL_SMART, MODEL_FAST
 from core.safety import run_in_sandbox
 from core.async_utils import retry_api_call
+from core.utils import extract_code
 
 class BridgeEngine:
     """
@@ -43,12 +44,7 @@ class BridgeEngine:
                 )
             raise e
 
-    def _extract_code(self, text: str) -> str:
-        if "```python" in text:
-            return text.split("```python")[1].split("```")[0].strip()
-        elif "```" in text:
-            return text.split("```")[1].split("```")[0].strip()
-        return text.strip()
+            raise e
 
     async def reproduce_paper(self, pdf_text: str) -> Dict[str, Any]:
         """
@@ -83,7 +79,7 @@ class BridgeEngine:
                 model=MODEL_SMART,
                 contents=prompt
             )
-            code_snippet = self._extract_code(response.text)
+            code_snippet = extract_code(response.text)
             
             # Execute in sandbox
             execution_result = run_in_sandbox(code_snippet)
