@@ -15,14 +15,14 @@
 ### 1. The Eyes: Vision-First Document Parsing
 Solves the "OCR Problem" for scientific papers.
 - **Visual Context**: Uses **Gemini 3 Flash Vision** to "read" papers like a human, preserving LaTeX formulas, complex tables, and layout structure that text-only parsers miss.
-- **Smart Scanning**: Automatically optimizes token usage by selectively scanning Abstract, Conclusion, and key results for large documents.
+- **Vision Forensics**: Scans extracted images and figures for pixel manipulation and deepfake artifacts.
 
 ### 2. The Brain: Veritas & Prometheus
-- **Veritas (Truth Scope)**: Implements **Chain-of-Verification (CoVe)** to audit research papers. It cross-references claims against citations and detects hallucinations.
-- **Prometheus (Code Reactor)**: A JAX-powered optimization engine. It detects math-heavy Python code (e.g., nested loops) and transpiles it into **JAX** for up to **100x speedups** on CPU/TPU.
+- **Veritas (Truth Scope)**: Implements **Chain-of-Verification (CoVe)** with **Deterministic Span-Level Verification (SLV)** to audit research papers. It cross-references claims against citations and flags insufficiently grounded claims.
+- **Prometheus (Code Reactor)**: A specialized optimization engine that applies intelligent routing. Math-heavy loops are transpiled into **JAX** for 100x speedups, general logic degrades to a built-in **Algorithmic Complexity Reducer**, while business operations use the **SQL Performance Audit** mode.
 
 ### 3. The Nervous System: Hybrid Parallelism
-- **AsyncIO + Multiprocessing**: Handles I/O-bound API calls and CPU-bound image processing concurrently, ensuring a buttery smooth UI even during heavy workloads.
+- **AsyncIO + CPU-Bound Jobs**: Concurrently runs `AI Sentinel` security checks and `Model Classification` routing, ensuring heavy computation and I/O-bound API calls remain fast and buttery smooth.
 
 ## 🛠️ Installation
 
@@ -65,15 +65,16 @@ streamlit run app.py
 Navigate to **localhost:8501**.
 
 ### Workflow
-1. **Audit Paper**: Upload a PDF. Aletheia will extract claims and verify them against the text using CoVe.
-2. **Deep Reproduction**: Upload a paper with algorithms. Aletheia will extract the math and generate a sandboxed Python simulation to verify the results.
-3. **Hyper-Optimize**: Point Aletheia to a GitHub repo or upload files. It will scan for performance bottlenecks and rewrite them in JAX.
+1. **Step 1: Audit Paper (Veritas)**: Upload a PDF. Aletheia extracts claims, verifies them via CoVe & Span-Level Verification, and performs Vision Forensics on embedded images to detect manipulation.
+2. **Step 2: Reproduce Code (Bridge)**: Upload a paper with computational algorithms. Aletheia securely extracts math claims and generates a sandboxed Python simulation to test and independently verify the results.
+3. **Step 3: Hyper-Optimize (Prometheus)**: Point Aletheia to a public GitHub repo, upload code files, or supply SQL queries. It automatically classifies the input—routing it to JAX optimization, an Algorithmic Complexity Reducer, or an SQL Analyzer.
 
 ## 🛡️ Security
-Aletheia includes a hardened **Security Sandbox**:
-- **AST Analysis**: Blocks dangerous imports (`os`, `subprocess`, `socket`) in generated code.
-- **Module Whitelisting**: Only safe libraries (`numpy`, `pandas`, `jax`, `scikit-learn`) are allowed.
-- **Taint Analysis**: Tracks data flow to prevent injection attacks.
+Aletheia includes an Ironclad **Security Sandbox** and **Deterministic Output Firewall**:
+- **AI Sentinel Protocol**: A dedicated async Gemini layer analyzing code for malicious intent (e.g. reverse shells, environment exfiltration).
+- **Deterministic Output Firewall**: Zero-API scanning that leverages Shannon entropy and regex to block Prompt Injections, Secret/Key Leaks, and jailbreak attempts before rendering them.
+- **AST Static Analysis**: Strict syntax checking that blocks dangerous execution nodes (`exec`, `eval`, `open`, `__import__`) and external imports (e.g. `subprocess`, `os`).
+- **Module Whitelisting**: Safe execution guarantees, limiting computations to tightly controlled libraries (`numpy`, `pandas`, `jax`, `math`).
 
 ## 🤝 Contributing
 We welcome contributions! Please see `CONTRIBUTING.md` for guidelines.

@@ -22,7 +22,7 @@ async def test_parallel_execution():
         # Simulate delay to test parallelization
         await asyncio.sleep(0.1)
         # Return different responses based on model
-        if kwargs.get('model') == 'gemini-2.0-flash-exp':
+        if kwargs.get('model') == 'gemini-3-flash-preview':
             return mock_security_response
         return mock_classify_response
     
@@ -49,7 +49,7 @@ async def test_parallel_execution():
     print("Test 2: Testing security violation handling...")
     
     async def mock_generate_block(*args, **kwargs):
-        if kwargs.get('model') == 'gemini-2.0-flash-exp':
+        if kwargs.get('model') == 'gemini-3-flash-preview':
             block_response = MagicMock()
             block_response.text = "BLOCK"
             return block_response

@@ -27,7 +27,7 @@ elif navigation == "Step 2: Reproduce Code (Bridge)":
 
 ### Issue #2: Model API Quota Exhaustion (FIXED ✅✅✅)
 **Location:** `core/config.py`
-**Problem:** Gemini 3 preview models hitting rate limits
+**Problem:** Gemini 3.1 preview models hitting rate limits
 
 **Evidence from logs:**
 ```
@@ -45,20 +45,20 @@ Line 31: 429 RESOURCE_EXHAUSTED - async refactor failure
 ```python
 # Before (Preview Models - Quota Limited):
 MODEL_FAST = "gemini-3-flash-preview"       # 503 errors
-MODEL_SMART = "gemini-3-pro-preview"        # 429 errors
-MODEL_THINKING = "gemini-3-pro-preview"     # 429 errors
+MODEL_SMART = "gemini-3.1-pro-preview"        # 429 errors
+MODEL_THINKING = "gemini-3.1-pro-preview"     # 429 errors
 MODEL_CLASSIFY = "gemini-3-flash-preview"   # 503 errors
-MODEL_VISION = "gemini-3-pro-preview"       # 429 errors
+MODEL_VISION = "gemini-3.1-pro-preview"       # 429 errors
 
-# After (Stable Gemini 2.0 - Higher Limits):
-MODEL_FAST = "gemini-2.0-flash-exp"
-MODEL_SMART = "gemini-2.0-flash-exp"
-MODEL_THINKING = "gemini-2.0-flash-thinking-exp-1219"
-MODEL_CLASSIFY = "gemini-2.0-flash-exp"
-MODEL_VISION = "gemini-2.0-flash-exp"
+# After (Stable Gemini 3 - Higher Limits):
+MODEL_FAST = "gemini-3-flash-preview"
+MODEL_SMART = "gemini-3-flash-preview"
+MODEL_THINKING = "gemini-3-flash-preview"
+MODEL_CLASSIFY = "gemini-3-flash-preview"
+MODEL_VISION = "gemini-3-flash-preview"
 ```
 
-**Why Gemini 2.0 Flash?**
+**Why Gemini 3 Flash?**
 1. ✅ **Stable:** Production-ready, not preview
 2. ✅ **Higher quotas:** 1500 RPM vs preview's restrictive limits
 3. ✅ **Better availability:** No 503 Service Unavailable errors
@@ -104,7 +104,7 @@ MODEL_VISION = "gemini-2.0-flash-exp"
 
 ## 🚨 Known Limitations (By Design)
 
-1. **API Rate Limits:** Even Gemini 2.0 Flash has limits
+1. **API Rate Limits:** Even Gemini 3.1 Flash has limits
    - **Free tier:** 15 RPM (requests per minute)
    - **Solution:** Wait 4 seconds between operations if hitting limits
 
@@ -141,4 +141,4 @@ MODEL_VISION = "gemini-2.0-flash-exp"
 
 **Status:** 🟢 **PRODUCTION READY**
 
-The application should now run smoothly with stable Gemini 2.0 models.
+The application should now run smoothly with stable Gemini 3.1 models.
