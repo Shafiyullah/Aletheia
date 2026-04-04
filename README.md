@@ -65,9 +65,9 @@ streamlit run app.py
 Navigate to **localhost:8501**.
 
 ### Workflow
-1. **Step 1: Audit Paper (Veritas)**: Upload a PDF. Aletheia extracts claims, verifies them via CoVe & Span-Level Verification, and performs Vision Forensics on embedded images to detect manipulation.
-2. **Step 2: Reproduce Code (Bridge)**: Upload a paper with computational algorithms. Aletheia securely extracts math claims and generates a sandboxed Python simulation to test and independently verify the results.
-3. **Step 3: Hyper-Optimize (Prometheus)**: Point Aletheia to a public GitHub repo, upload code files, or supply SQL queries. It automatically classifies the input—routing it to JAX optimization, an Algorithmic Complexity Reducer, or an SQL Analyzer.
+1. **Step 1: Audit Paper (Veritas)**: Upload a PDF. Aletheia extracts claims, verifies them against local files via CoVe & Span-Level Verification natively.
+2. **Step 2: Reproduce Code (Bridge)**: Upload a paper containing computational algorithms. Aletheia securely extracts math claims and uses an LLM to evaluate if the Sandbox output natively matches the paper's original claim.
+3. **Step 3: Hyper-Optimize (Prometheus)**: Supply a direct, public GitHub repository link or local uploads for Deep Audit mode.
 
 ## 🛡️ Security
 Aletheia includes an Ironclad **Security Sandbox** and **Deterministic Output Firewall**:
@@ -75,6 +75,9 @@ Aletheia includes an Ironclad **Security Sandbox** and **Deterministic Output Fi
 - **Deterministic Output Firewall**: Zero-API scanning that leverages Shannon entropy and regex to block Prompt Injections, Secret/Key Leaks, and jailbreak attempts before rendering them.
 - **AST Static Analysis**: Strict syntax checking that blocks dangerous execution nodes (`exec`, `eval`, `open`, `__import__`) and external imports (e.g. `subprocess`, `os`).
 - **Module Whitelisting**: Safe execution guarantees, limiting computations to tightly controlled libraries (`numpy`, `pandas`, `jax`, `math`).
+
+## ⚠️ Known Limitations
+- **Rate Limits**: Running Aletheia via the Free Gemini 3 APIs subjects you to standard quotas (15 RPM). Hitting timeouts throws a native 429 Graceful Halt directly to the UI, guaranteeing your system remains deterministic without mocking data. Maintain conservative request usage for massive repos.
 
 ## 🤝 Contributing
 We welcome contributions! Please see `CONTRIBUTING.md` for guidelines.

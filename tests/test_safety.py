@@ -21,7 +21,7 @@ def test_run_in_sandbox_safe():
     assert "hello world" in result
 
 def test_run_in_sandbox_violation():
-    code = "import os"
+    code = "eval('1')"
     with pytest.raises(SecurityViolationException):
         run_in_sandbox(code)
 

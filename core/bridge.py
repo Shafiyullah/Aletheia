@@ -44,8 +44,6 @@ class BridgeEngine:
                 )
             raise e
 
-            raise e
-
     async def reproduce_paper(self, pdf_text: str) -> Dict[str, Any]:
         """
         1. Extract Formula/Claim.
@@ -89,9 +87,31 @@ class BridgeEngine:
                 if "Error" in execution_result:
                     status = "Failed (Runtime Error)"
                 else:
-                    status = "Executed Successfully"
-                    # TODO: Add logic to compare execution_result with paper claim using LLM?
-                    # For now, just mark executing as success.
+                    # Verify execution result with paper claim using LLM
+                    verification_prompt = f"""
+                    ### ROLE: Verification Engine Tracker
+                    ### TASK: Determine if the Python code execution output matches or proves the mathematical claim inside the Research Paper excerpt.
+                    
+                    ### EXCERPT:
+                    {pdf_text[:4000]}
+                    
+                    ### EXECUTION OUTPUT:
+                    {execution_result}
+                    
+                    ### QUESTION: Does the output verify the claim? Answer with 'YES' or 'NO', followed by a one-sentence reason.
+                    """
+                    try:
+                        eval_resp = await self._safe_generate_content(
+                            model=MODEL_FAST,
+                            contents=verification_prompt
+                        )
+                        if eval_resp and eval_resp.text and "YES" in eval_resp.text.strip().upper()[:10]:
+                            status = "Verified Successfully"
+                        else:
+                            status = f"Failed (Logic Mismatch): {eval_resp.text[:50]}"
+                    except Exception as verify_err:
+                        logging.error(f"Verification Check Failed: {verify_err}")
+                        status = "Executed Successfully (Verification Unreachable)"
             else:
                 status = "Failed (No Output)"
 

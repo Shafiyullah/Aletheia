@@ -6,7 +6,6 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.vision_parser import vision_parser, parse_research_paper
-from data.demo_repo import DEMO_PDF_CONTENT
 
 async def test_vision_parser():
     print("--- Testing Vision-First PDF Parser ---\n")

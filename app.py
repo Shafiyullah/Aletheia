@@ -12,7 +12,6 @@ from core.vision import extract_images_from_pdf, audit_visual_integrity
 from core.vision_parser import parse_research_paper, VisionParser
 from core.async_utils import async_manager
 from core.safety import validate_llm_output, SecurityViolationException
-from data.demo_repo import DEMO_FILES, DEMO_PDF_CONTENT
 
 # --- Page Config ---
 st.set_page_config(layout="wide", page_title="ALETHEIA: Unified Truth Engine", page_icon="⚖️")
@@ -140,13 +139,10 @@ if navigation == "Step 3: Hyper-Optimize (Prometheus)":
     
     with col1:
         st.subheader("REPO SCANNER")
-        input_mode = st.radio("Input Source", ["Simulation", "Upload", "GitHub"], horizontal=True)
+        input_mode = st.radio("Input Source", ["Upload", "GitHub"], horizontal=True)
         
         files = {}
-        if input_mode == "Simulation":
-            files = DEMO_FILES
-            st.success("✅ Loaded Demo Repository")
-        elif input_mode == "Upload":
+        if input_mode == "Upload":
             uploaded = st.file_uploader("Upload Python Files", accept_multiple_files=True)
             if uploaded:
                 for uf in uploaded:
@@ -261,7 +257,6 @@ elif navigation == "Step 1: Audit Paper (Veritas)":
         pdf_file = st.file_uploader("Upload Research PDF", type=["pdf"])
         
         text = ""
-        demo_active = False
         if pdf_file:
             if st.checkbox("Enable Vision-First Parsing (Slower but Accurate)", value=True):
                 with st.status("🔍 Analyzing Document Structure...", expanded=True) as status:
@@ -290,17 +285,6 @@ elif navigation == "Step 1: Audit Paper (Veritas)":
                             text = st.session_state.veritas.extract_text_from_pdf(pdf_file)
             else:
                 text = st.session_state.veritas.extract_text_from_pdf(pdf_file)
-        
-        # Demo Mode with Auto-Trigger
-        if st.button("⚡ LOAD DEMO PAPER"):
-            st.session_state.demo_text = DEMO_PDF_CONTENT
-            st.session_state.demo_active = True
-            st.success("✅ Loaded Demo Research Paper")
-            st.info("Click '🚀 RUN AUDIT' below to start Chain-of-Verification")
-            
-        # Use persisted text if available
-        if "demo_text" in st.session_state and st.session_state.demo_text:
-            text = st.session_state.demo_text
             
         if text:
             if st.button("🚀 RUN CHAIN-OF-VERIFICATION (CoVe)", type="primary"):
@@ -312,33 +296,12 @@ elif navigation == "Step 1: Audit Paper (Veritas)":
                 with st.spinner("Running Chain-of-Verification Protocol..."):
                     audit_results = render_neural_logs(asyncio.run, run_audit())
                     
-                    # Check for Rate Limit Errors and Fallback to Demo Data
+                    # Check for Error Responses
                     if audit_results and isinstance(audit_results, list) and len(audit_results) > 0:
                         first_result = audit_results[0]
                         if "error" in first_result:
-                            err_msg = str(first_result["error"])
-                            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "503" in err_msg or "UNAVAILABLE" in err_msg:
-                                st.warning("⚠️ API Quota Exhausted. Using Demo Audit Results...")
-                                audit_results = [
-                                    {
-                                        "claim": "JAX optimization provides 100x speedup for gradient descent.",
-                                        "citation": "Google Research (2024)",
-                                        "verification": "YES",
-                                        "evidence": "The paper correctly cites Google's JAX documentation. Empirical benchmarks confirm 10-100x speedup for gradient operations on GPU/TPU."
-                                    },
-                                    {
-                                        "claim": "Neuro-symbolic validation eliminates hallucinations.",
-                                        "citation": "DeepMind (2025)",
-                                        "verification": "NO",
-                                        "evidence": "The citation year is incorrect - DeepMind has not published this claim as of 2024. The paper appears to be speculative."
-                                    },
-                                    {
-                                        "claim": "Chain-of-Verification reduces hallucinations by 40%.",
-                                        "citation": "Meta AI Research (2023)",
-                                        "verification": "YES",
-                                        "evidence": "This matches the original CoVe paper published by Meta AI. The 40% reduction figure is accurately cited."
-                                    }
-                                ]
+                            st.error(f"⚠️ API Error: {first_result['error']}")
+                            st.stop()
                         
                         # ---> DETERMINISTIC SPAN-LEVEL VERIFICATION <---
                         add_log("[SLV] Running deterministic Span-Level Verification...")
@@ -437,14 +400,7 @@ elif navigation == "Step 2: Reproduce Code (Bridge)":
                 text_repro = st.session_state.veritas.extract_text_from_pdf(pdf_repro_file)
             st.success(f"✅ Extracted {len(text_repro)} characters")
         
-        if st.button("⚡ USE DEMO PAPER", key="demo_repro"):
-            text_repro = DEMO_PDF_CONTENT
-            st.success("✅ Loaded Demo (Contains Math: f(x) = x² + 2x + 1)")
-        
-        if text_repro or st.button("🧪 START DEEP REPRODUCTION", type="primary", disabled=(not text_repro and "text_repro" not in st.session_state)):
-            if not text_repro:
-                text_repro = DEMO_PDF_CONTENT  # Fallback
-            
+        if text_repro and st.button("🧪 START DEEP REPRODUCTION", type="primary"):
             add_log("Extracting math snippets from paper...")
             with st.spinner("Executing in Sandbox..."):
                 repro = asyncio.run(st.session_state.bridge.reproduce_paper(text_repro))

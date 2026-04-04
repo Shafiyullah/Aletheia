@@ -81,7 +81,7 @@ def validate_imports(code_str: str) -> Tuple[bool, Optional[str]]:
                     return False, json.dumps({
                         "status": "dependency_error",
                         "missing_lib": top_level_pkg,
-                        "message": f"Library '{top_level_pkg}' is not available in the Demo Environment."
+                        "message": f"Library '{top_level_pkg}' execution blocked by security sandbox policy."
                     })
         elif isinstance(node, ast.ImportFrom):
             if node.module:
@@ -90,7 +90,7 @@ def validate_imports(code_str: str) -> Tuple[bool, Optional[str]]:
                     return False, json.dumps({
                         "status": "dependency_error",
                         "missing_lib": top_level_pkg,
-                        "message": f"Library '{top_level_pkg}' is not available in the Demo Environment."
+                        "message": f"Library '{top_level_pkg}' execution blocked by security sandbox policy."
                     })
     
     return True, None
