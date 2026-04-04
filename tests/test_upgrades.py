@@ -1,6 +1,7 @@
 """Quick functional test of the upgraded safety and veritas modules."""
 import sys
-sys.path.insert(0, r'c:\Users\Shafi\Desktop\Gemini 3 Hackathon')
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.safety import validate_llm_output, SecurityViolationException
 
