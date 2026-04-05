@@ -1,11 +1,10 @@
-version: '3.8'
 services:
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_USER: aletheia_user
-      POSTGRES_PASSWORD: aletheia_password
-      POSTGRES_DB: aletheia_db
+      POSTGRES_USER: ${POSTGRES_USER:-aletheia_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-aletheia_db}
     ports:
       - "5432:5432"
     volumes:
@@ -22,9 +21,9 @@ services:
       dockerfile: Dockerfile.api
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - DATABASE_URL=postgresql://aletheia_user:aletheia_password@postgres:5432/aletheia_db
-      - REDIS_URL=redis://redis:6379/0
-      - ALETHEIA_SECRET_KEY=${ALETHEIA_SECRET_KEY:-b3c9f28a7d189e4c5b3648f5a2b19e26d9c87f3e1b7d5a5cf2b3e4f8d9b1a2c3}
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - ALETHEIA_SECRET_KEY=${ALETHEIA_SECRET_KEY}
     depends_on:
       - postgres
       - redis
@@ -38,8 +37,9 @@ services:
     command: celery -A core.worker worker --loglevel=info
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - DATABASE_URL=postgresql://aletheia_user:aletheia_password@postgres:5432/aletheia_db
-      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - ALETHEIA_SECRET_KEY=${ALETHEIA_SECRET_KEY}
     depends_on:
       - redis
       - postgres

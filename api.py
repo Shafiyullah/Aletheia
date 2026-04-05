@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
     db = next(get_db())
     admin_user = db.query(User).filter(User.username == "enterprise_admin").first()
     if not admin_user:
-        hashed_pw = get_password_hash("secure_hyper_admin123!")
+        hashed_pw = get_password_hash(os.environ.get("ADMIN_PASSWORD", "secure_hyper_admin123!"))
         admin_user = User(
             username="enterprise_admin",
             email="admin@aletheia.local",

@@ -11,7 +11,12 @@ except ImportError:
     from jwt.exceptions import InvalidTokenError as JWTError
 
 # Enterprise security parameters
-SECRET_KEY = os.environ.get("ALETHEIA_SECRET_KEY", "b3c9f28a7d189e4c5b3648f5a2b19e26d9c87f3e1b7d5a5cf2b3e4f8d9b1a2c3") # Always overwrite in real PROD!
+# JWT_SECRET MUST be set in production
+SECRET_KEY = os.environ.get("ALETHEIA_SECRET_KEY")
+if not SECRET_KEY:
+    if os.environ.get("ENV") == "PROD":
+        raise ValueError("Critical Security Error: ALETHEIA_SECRET_KEY not found in production environment.")
+    SECRET_KEY = "dev-secret-only" # Safe default for local/CI tests
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 

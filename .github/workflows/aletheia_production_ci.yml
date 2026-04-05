@@ -1,4 +1,4 @@
-name: Aletheia Enterprise CI
+name: Aletheia CI
 
 on:
   push:
@@ -13,10 +13,10 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v4
+    - name: Set up Python 3.14
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.12'
+        python-version: '3.14'
         
     - name: Install dependencies
       run: |
@@ -26,10 +26,10 @@ jobs:
         
     - name: Formal Verification Pre-Flight (Bandit)
       run: |
-        bandit -r core/ -c pyproject.toml -s B101 || echo "Bandit warnings found but continuing tests"
+        bandit -r core/ -s B101 || echo "Bandit warnings found but continuing tests"
         
     - name: Execute Deterministic Test Suite
       env:
         ALETHEIA_SECRET_KEY: "ci-dummy-key-do-not-use-in-prod"
       run: |
-        pytest tests/ -v
+        PYTHONPATH=. pytest tests/ -v
