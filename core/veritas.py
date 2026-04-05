@@ -4,7 +4,7 @@ import json
 import os
 import re
 from typing import List, Dict, Any, Tuple, Optional, Set
-import PyPDF2
+import pypdf
 from google import genai
 from core.config import MODEL_SMART, MODEL_FAST
 from core.safety import run_in_sandbox, SecurityViolationException
@@ -50,7 +50,7 @@ class VeritasAuditor:
     def extract_text_from_pdf(self, file_obj) -> str:
         """Extracts text from a PDF file object."""
         try:
-            reader = PyPDF2.PdfReader(file_obj)
+            reader = pypdf.PdfReader(file_obj)
             text = ""
             for page in reader.pages:
                 text += page.extract_text() + "\n"

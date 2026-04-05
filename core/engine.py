@@ -116,8 +116,10 @@ class AletheiaEngine:
                     "--per_path_timeout", "1"
                 ]
                 
+                env["PYTHONPATH"] = os.path.dirname(tf_path) + os.pathsep + env.get("PYTHONPATH", "")
+                
                 # Bounded total execution solver time
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=5)
                 out = result.stdout + result.stderr
                 
                 if "No differences found" in out or "CrossHair explored" in out and "different" not in out:

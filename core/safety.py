@@ -508,7 +508,7 @@ def _is_encoded_payload(text: str) -> dict:
         signals += 1
 
     results["signals_triggered"] = signals
-    results["is_suspicious"] = signals >= 3  # Require ≥3 tests to agree for high-precision blocking
+    results["is_suspicious"] = signals >= 2  # Adjusted for high-sensitivity on short 64-byte secrets
 
     return results
 

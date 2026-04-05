@@ -31,7 +31,7 @@ psycopg2-binary==2.9.11
 python-dotenv==1.2.2
 
 # DOCUMENT PROCESSING
-PyPDF2==3.0.1
+pypdf==5.1.0
 pdf2image==1.17.0
 Pillow==12.2.0
 
