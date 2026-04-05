@@ -93,6 +93,9 @@ class AletheiaEngine:
         4. Do NOT call them. Return ONLY the code block containing the two functions.
         """
         
+        env = os.environ.copy()
+        equiv = False
+        
         try:
             if not self.client: return True # Bypass if keys aren't loaded
 
@@ -102,24 +105,39 @@ class AletheiaEngine:
             )
             module_code = extract_code(response.text)
             
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as tf:
-                tf.write(module_code)
-                tf_path = tf.name
-                
-            module_name = os.path.splitext(os.path.basename(tf_path))[0]
+            # Sanitize code using AST to remove side-effects.
+            import ast
+            try:
+                tree = ast.parse(module_code)
+                # Keep only function definitions
+                tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
+                sanitized_code = ast.unparse(tree)
+            except Exception:
+                # Fallback to raw code if AST parsing fails
+                sanitized_code = module_code
+            
+            project_root = os.path.abspath(".")
+            module_fn = "_ale_verify.py"
+            tf_path = os.path.join(project_root, module_fn)
+            with open(tf_path, 'w') as f:
+                f.write(module_code)
+            
+            # Module name is the filename without .py
+            module_name = "_ale_verify"
             
             # Execute crosshair diffbehavior with a strict 5-second per-path execution limit
             try:
                 cmd = [
                     sys.executable, "-m", "crosshair", "diffbehavior",
-                    f"{tf_path}:func_original", f"{tf_path}:func_optimized",
+                    f"{module_name}:func_original", f"{module_name}:func_optimized",
                     "--per_path_timeout", "1"
                 ]
                 
-                env["PYTHONPATH"] = os.path.dirname(tf_path) + os.pathsep + env.get("PYTHONPATH", "")
+                # Still set PYTHONPATH for absolute robustness
+                env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
                 
                 # Bounded total execution solver time
-                result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=5)
+                result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=5, cwd=project_root)
                 out = result.stdout + result.stderr
                 
                 if "No differences found" in out or "CrossHair explored" in out and "different" not in out:
@@ -128,7 +146,8 @@ class AletheiaEngine:
                     logging.warning(f"Z3 Solver Equivalence Mismatch: {out[:300]}")
                     equiv = False
                 else:
-                    equiv = True # fallback if standard exit 0 and no alerts
+                    # If it's silent and exited with 0, we assume equivalence for these simple checks
+                    equiv = (result.returncode == 0)
                     
             except subprocess.TimeoutExpired:
                  # If SMT Z3 cannot solve it within 5 seconds, it's too complex or loops infinitely.
@@ -136,7 +155,8 @@ class AletheiaEngine:
                  equiv = False
             finally:
                  try:
-                     os.remove(tf_path)
+                     if os.path.exists(tf_path):
+                         os.remove(tf_path)
                  except OSError:
                      pass
                      

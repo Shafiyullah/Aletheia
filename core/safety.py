@@ -480,7 +480,8 @@ def _is_encoded_payload(text: str) -> dict:
     # Test 1: Shannon Entropy (Classic)
     entropy = _shannon_entropy(text)
     results["shannon_entropy"] = round(entropy, 3)
-    if entropy > 5.5:
+    # Sensitivity calibrated: 5.0 catches 64-byte random secrets reliably
+    if entropy > 5.0:
         signals += 1
 
     # Test 2: Chi-Squared Uniformity (P-Value)
