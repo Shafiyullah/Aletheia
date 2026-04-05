@@ -1,0 +1,26 @@
+FROM python:3.14-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir streamlit httpx requests pydantic pandas networkx streamlit-agraph
+
+# Copy source code (only app.py and necessary assets)
+# Note: In a pure enterprise decouple, we don't even COPY the /core folder to the frontend container
+# to prevent direct imports, but for now we copy all and rely on stripping imports in app.py.
+COPY . .
+
+EXPOSE 8501
+
+HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
+
+ENTRYPOINT ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]

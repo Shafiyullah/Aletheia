@@ -62,14 +62,12 @@ def audit_visual_integrity(images):
         try:
             # Note: In production, we might limit this to the first 5 images to save tokens
             # Using MODEL_VISION from config
-            print(f"DEBUG: Using model: {MODEL_VISION}")
             response = client.models.generate_content(
                 model=MODEL_VISION,
                 contents=[prompt, *images[:10]] 
             )
             return response.text
         except Exception as e:
-            print(f"DEBUG: Primary model failed ({e}). Trying fallback...")
             # Fallback to gemini-3-flash-preview
             response = client.models.generate_content(
                 model="gemini-3-flash-preview",
@@ -77,6 +75,4 @@ def audit_visual_integrity(images):
             )
             return response.text
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         return f"Error in visual audit: {str(e)}"

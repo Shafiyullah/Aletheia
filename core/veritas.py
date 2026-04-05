@@ -173,7 +173,7 @@ class VeritasAuditor:
                 "confidence": 0.0
             }
 
-    # --- Span-Level Verification (Deterministic, No LLM) ---
+    # Span-Level Verification (Deterministic, No LLM)
 
     @staticmethod
     def _extract_ngrams(text: str, n: int) -> Set[str]:
@@ -194,7 +194,6 @@ class VeritasAuditor:
     def _extract_reference_section(source_text: str) -> str:
         """
         Extracts the References/Bibliography section from academic text.
-        Falls back to the last 20% of the document if no header is found.
         """
         patterns = [
             r'(?i)\n\s*references\s*\n',
@@ -206,33 +205,50 @@ class VeritasAuditor:
             match = re.search(pattern, source_text)
             if match:
                 return source_text[match.start():]
-        cutoff = int(len(source_text) * 0.8)
-        return source_text[cutoff:]
+        return source_text[int(len(source_text) * 0.8):]
 
     @staticmethod
     def _extract_numbers(text: str) -> Set[str]:
         """Extracts all numerical values and percentages from text."""
         return set(re.findall(r'\d+(?:\.\d+)?(?:%|x)?', text))
 
+    def _proximity_score(self, query: str, source: str) -> float:
+        """
+        Calculates a proximity-weighted similarity score.
+        """
+        words = [w.lower() for w in re.findall(r'\w+', query) if len(w) > 3]
+        if not words: return 1.0
+        
+        source_words = [w.lower() for w in re.findall(r'\w+', source)]
+        word_indices = {}
+        for i, w in enumerate(source_words):
+            if w in words:
+                word_indices.setdefault(w, []).append(i)
+        
+        if len(word_indices) < 2:
+            return 0.5 if word_indices else 0.0
+
+        min_window = float('inf')
+        present_words = list(word_indices.keys())
+        for i in range(len(present_words)):
+            for j in range(i + 1, len(present_words)):
+                indices_a = word_indices[present_words[i]]
+                indices_b = word_indices[present_words[j]]
+                for idx_a in indices_a:
+                    for idx_b in indices_b:
+                        min_window = min(min_window, abs(idx_a - idx_b))
+        
+        if min_window <= 10: return 1.0
+        if min_window >= 100: return 0.0
+        return 1.0 - (min_window / 100)
+
     def span_level_verify(self, claim_results: List[Dict[str, Any]], source_text: str) -> List[Dict[str, Any]]:
         """
         Deterministic Span-Level Verification (SLV).
-        
-        Runs three independent checks on each "YES" claim:
-          1. Citation Grounding — Does the cited author/source appear in the
-             document's reference section?
-          2. Claim-Source Overlap — N-gram Jaccard similarity between the claim
-             and actual source text. Catches fabricated language.
-          3. Numerical Anchoring — Do specific numbers/percentages in the claim 
-             exist in the source?
-             
-        Each check produces a 0.0-1.0 score. Combined weighted score below the
-        threshold triggers rejection.
         """
-        REJECTION_THRESHOLD = 0.15
+        REJECTION_THRESHOLD = 0.25 
         verified_results = []
 
-        # Pre-compute once for all claims
         normalized_source = " ".join(source_text.split()).lower()
         source_ngrams = self._extract_ngrams(normalized_source, 4)
         source_numbers = self._extract_numbers(normalized_source)
@@ -243,70 +259,38 @@ class VeritasAuditor:
                 verified_results.append(res)
                 continue
 
-            claim_text = res.get("claim", "")
-            citation = res.get("citation", "")
+            claim_text = str(res.get("claim", ""))
+            citation = str(res.get("citation", "")).lower()
             rejection_reasons = []
 
-            # --- Check 1: Citation Grounding (weight: 0.4) ---
-            citation_score = 0.0
-            if citation and citation != "No citation":
-                common_words = {'the', 'and', 'for', 'from', 'with', 'that', 'this', 'research', 'paper', 'study'}
-                citation_tokens = [
-                    w.strip('().,;:') for w in citation.split()
-                    if len(w.strip('().,;:')) > 2 and w.strip('().,;:').lower() not in common_words
-                ]
-                if citation_tokens:
-                    matched = sum(1 for t in citation_tokens if t.lower() in ref_section)
-                    citation_score = matched / len(citation_tokens)
-                if citation_score < 0.3:
-                    rejection_reasons.append(
-                        f"Citation '{citation}' not found in document references "
-                        f"(match: {citation_score:.0%})"
-                    )
-            else:
-                citation_score = 0.0
-                rejection_reasons.append("No citation provided for a verified claim")
+            # 1. Citation Grounding
+            cit_score = 1.0 if citation in ref_section or any(p in ref_section for p in citation.split() if len(p) > 2) else 0.0
+            if cit_score < 1.0:
+                rejection_reasons.append(f"Citation '{citation}' not found in references.")
 
-            # --- Check 2: Claim-Source N-gram Overlap (weight: 0.35) ---
+            # 2. Semantic Overlap
             claim_ngrams = self._extract_ngrams(claim_text.lower(), 4)
             overlap_score = self._jaccard_similarity(claim_ngrams, source_ngrams)
-            scaled_overlap = min(overlap_score / 0.02, 1.0)
-            if scaled_overlap < 0.3:
-                rejection_reasons.append(
-                    f"Claim language has very low overlap with source text "
-                    f"(Jaccard: {overlap_score:.4f})"
-                )
+            if overlap_score < 0.01:
+                rejection_reasons.append("Low semantic overlap with source.")
 
-            # --- Check 3: Numerical Anchoring (weight: 0.25) ---
-            claim_numbers = self._extract_numbers(claim_text)
-            if claim_numbers:
-                anchored = claim_numbers & source_numbers
-                number_score = len(anchored) / len(claim_numbers)
-                if number_score < 0.5:
-                    unanchored = claim_numbers - source_numbers
-                    rejection_reasons.append(
-                        f"Numbers {unanchored} in claim not found in source document"
-                    )
-            else:
-                number_score = 1.0
+            # 3. Numerical Anchoring
+            claim_nums = self._extract_numbers(claim_text)
+            num_score = 1.0 if not claim_nums else (len(claim_nums & source_numbers) / len(claim_nums))
+            if num_score < 1.0:
+                rejection_reasons.append("Numerical data in claim not found in source.")
 
-            # --- Combined Score ---
-            combined = (citation_score * 0.4) + (scaled_overlap * 0.35) + (number_score * 0.25)
+            # 4. Proximity Weighted Support
+            prox_score = self._proximity_score(claim_text, normalized_source)
 
+            # Weighting: Citation(0.3), Overlap(0.3), Numbers(0.2), Proximity(0.2)
+            combined = (cit_score * 0.3) + (min(overlap_score / 0.02, 1.0) * 0.3) + (num_score * 0.2) + (prox_score * 0.2)
+            
+            res["slv_score"] = round(combined, 3)
             if combined < REJECTION_THRESHOLD:
                 res["verification"] = "NO"
-                res["slv_score"] = round(combined, 3)
-                res["evidence"] = (
-                    f"[SLV REJECTED] (score: {combined:.3f}/{REJECTION_THRESHOLD}). "
-                    f"Reasons: {'; '.join(rejection_reasons)}"
-                )
-                logging.warning(
-                    f"SLV rejected claim: '{claim_text[:60]}...' "
-                    f"(score={combined:.3f}, reasons={rejection_reasons})"
-                )
-            else:
-                res["slv_score"] = round(combined, 3)
-
+                res["evidence"] = f"[SLV REJECTED] Score: {res['slv_score']}. Reasons: {'; '.join(rejection_reasons)}"
+            
             verified_results.append(res)
 
         return verified_results

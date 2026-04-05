@@ -22,9 +22,11 @@ async def test_dispatch_math(engine):
         MagicMock(text=json.dumps({"method": "jax", "code": "import jax"})) # JAX Gen
     ]
     
-    # Mock Security Check to pass (it runs in parallel)
-    # Must patch core.safety.ai_security_check_async because core.engine imports it
-    with patch("core.safety.ai_security_check_async", new_callable=AsyncMock) as mock_sec:
+    # Mock Security Check and Equivalence check
+    with patch("core.safety.ai_security_check_async", new_callable=AsyncMock) as mock_sec, \
+         patch.object(engine, "_verify_equivalence", new_callable=AsyncMock) as mock_equiv:
+         
+        mock_equiv.return_value = True
         result_json = await engine.dispatch_optimization("import numpy as np")
         
     result = json.loads(result_json)

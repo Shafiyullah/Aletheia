@@ -6,6 +6,7 @@ import os
 import json
 import math
 import logging
+import tempfile
 from typing import Tuple, Optional, List
 from google import genai
 from core.config import MODEL_FAST
@@ -57,6 +58,41 @@ def static_analysis_check(code_str: str) -> None:
 
     if visitor.violations:
         raise SecurityViolationException(f"Security Violations Found: {', '.join(visitor.violations)}")
+
+    # Deep Analysis: Bandit integration
+    try:
+        from bandit.core import config as b_config
+        from bandit.core import manager as b_manager
+        
+        b_conf = b_config.BanditConfig()
+        b_mgr = b_manager.BanditManager(b_conf, "file")
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as tf:
+            tf.write(code_str)
+            tf_path = tf.name
+            
+        b_mgr.discover_files([tf_path])
+        b_mgr.run_tests()
+        
+        # Cleanup
+        try:
+            os.remove(tf_path)
+        except OSError:
+            pass
+            
+        results = b_mgr.get_issue_list()
+        
+        bandit_violations = []
+        for issue in results:
+            bandit_violations.append(f"[Bandit {issue.severity}] {issue.text} (L{issue.lineno})")
+            
+        if bandit_violations:
+            raise SecurityViolationException(f"Bandit Security Violations Found: {'; '.join(bandit_violations)}")
+            
+    except SecurityViolationException:
+        raise
+    except Exception as e:
+        logging.warning(f"Bandit execution failed, continuing with AST check only: {e}")
 
 def validate_imports(code_str: str) -> Tuple[bool, Optional[str]]:
     """
@@ -221,7 +257,7 @@ async def ai_security_check_async(code_str: str) -> None:
         # If API fails, default to safe (allow regex to catch obvious stuff)
         pass
 
-# --- Deterministic Output Firewall (Zero API calls) ---
+# DETERMINISTIC OUTPUT FIREWALL
 
 _INJECTION_PATTERNS: List[re.Pattern] = [
     re.compile(r'ignore\s+(all\s+)?previous\s+instructions', re.IGNORECASE),
@@ -245,9 +281,10 @@ _SECRET_PATTERNS: List[re.Pattern] = [
     re.compile(r'password\s*[=:]\s*["\'][^"\']+(["\']+)', re.IGNORECASE),
 ]
 
+# MULTI-HEURISTIC STATISTICAL ANALYSIS ENGINE
 
 def _shannon_entropy(text: str) -> float:
-    """Shannon entropy of a string. High entropy = possibly encoded/encrypted data."""
+    """Shannon entropy H = -Σ p_i * log2(p_i). Higher = more random."""
     if not text:
         return 0.0
     freq = {}
@@ -256,6 +293,224 @@ def _shannon_entropy(text: str) -> float:
     length = len(text)
     return -sum((count / length) * math.log2(count / length) for count in freq.values())
 
+# ADVANCED ANOMALY METRICS
+
+# Baseline distribution: Average frequency of characters 32-126 in Python/English corpus.
+# Simplified representation (lowercase letters high, symbols medium, numbers low).
+_NATURAL_BASELINE = {
+    'e': 0.12, 't': 0.09, 'a': 0.08, 'o': 0.07, 'i': 0.07, 'n': 0.07, 's': 0.06, 'r': 0.06, 'h': 0.06,
+    'd': 0.04, 'l': 0.04, 'u': 0.03, 'c': 0.03, 'm': 0.03, 'f': 0.02, 'y': 0.02, 'w': 0.02, 'g': 0.02,
+    'p': 0.02, 'b': 0.01, 'v': 0.01, 'k': 0.01, 'x': 0.01, 'q': 0.01, 'j': 0.01, 'z': 0.01,
+    ' ': 0.15, '.': 0.01, ',': 0.01, '(': 0.01, ')': 0.01, '=': 0.01, '_': 0.02, ':': 0.01
+}
+# Normalize baseline
+_TOTAL_B = sum(_NATURAL_BASELINE.values())
+_NATURAL_PROBS = {k: v/_TOTAL_B for k, v in _NATURAL_BASELINE.items()}
+
+def _kl_divergence(text: str) -> float:
+    """
+    Kullback-Leibler Divergence (Relative Entropy).
+    Measures how much the character distribution deviates from 'Natural' text.
+    Target: 0.0 (identical) to ∞ (completely divergent).
+    """
+    if not text: return 0.0
+    text = text.lower()
+    length = len(text)
+    freq = {}
+    for c in text:
+        if c in _NATURAL_PROBS:
+            freq[c] = freq.get(c, 0) + 1
+    
+    if not freq: return 10.0 # Extreme divergence (non-ASCII or weird symbols only)
+
+    kl = 0.0
+    for char, prob_q in _NATURAL_PROBS.items():
+        # Observed probability P
+        count_p = freq.get(char, 0)
+        prob_p = count_p / length if count_p > 0 else 1e-9 # Smoothing
+        # D_KL = P(i) * log(P(i) / Q(i))
+        kl += prob_p * math.log(prob_p / prob_q)
+    
+    return kl
+
+def _simpsons_index(text: str) -> float:
+    """
+    Simpson's Diversity Index (D).
+    Measures evenness of character distribution.
+    D near 1.0 = High diversity (Natural).
+    D near 0.0 = Low diversity (Repetitive / Obfuscated).
+    """
+    if len(text) < 2: return 1.0
+    freq = {}
+    for c in text:
+        freq[c] = freq.get(c, 0) + 1
+    
+    N = len(text)
+    sum_n_n1 = sum(n * (n - 1) for n in freq.values())
+    D = 1 - (sum_n_n1 / (N * (N - 1)))
+    return D
+
+def _chi_squared_uniformity(text: str) -> float:
+    """
+    Chi-Squared test for character distribution uniformity.
+    
+    Encoded data (base64, hex) has a near-uniform distribution across its
+    character set. Natural language clusters heavily around lowercase letters.
+    
+    Returns: p-value. LOW p-value (< 0.05) = distribution is significantly
+    non-uniform (likely natural text). HIGH p-value (> 0.05) = distribution
+    is nearly uniform (likely encoded data).
+    
+    Reference: Fourmilab ent (https://www.fourmilab.ch/random/)
+    """
+    from scipy.stats import chisquare
+
+    if len(text) < 10:
+        return 1.0  # Too short to analyze
+
+    # Count frequency of each unique character
+    freq = {}
+    for c in text:
+        freq[c] = freq.get(c, 0) + 1
+
+    observed = list(freq.values())
+    n_categories = len(observed)
+
+    if n_categories < 2:
+        return 1.0
+
+    # Expected: if uniform, each char appears total/n_categories times
+    total = sum(observed)
+    expected = [total / n_categories] * n_categories
+
+    _, p_value = chisquare(observed, f_exp=expected)
+    return p_value
+
+
+def _serial_correlation(text: str) -> float:
+    """
+    Serial Correlation Coefficient (SCC) between adjacent characters.
+    
+    Truly random/encrypted data: SCC ≈ 0.0 (no correlation)
+    Natural English text: SCC ≈ 0.3-0.7 (high correlation, letters cluster)
+    Base64 encoded data: SCC ≈ 0.0-0.1 (low correlation)
+    
+    Returns: float between -1.0 and 1.0.
+    
+    Reference: Knuth TAOCP Vol 2, Section 3.3.2
+    """
+    if len(text) < 3:
+        return 0.5  # Not enough data
+
+    values = [ord(c) for c in text]
+    n = len(values)
+
+    mean = sum(values) / n
+    variance = sum((v - mean) ** 2 for v in values) / n
+
+    if variance == 0:
+        return 1.0  # All same character
+
+    covariance = sum(
+        (values[i] - mean) * (values[i + 1] - mean)
+        for i in range(n - 1)
+    ) / (n - 1)
+
+    return covariance / variance
+
+
+def _byte_frequency_score(text: str) -> float:
+    """
+    Byte Frequency Distribution analysis.
+    
+    Encoded data (base64) uses a narrow, specific alphabet:
+      A-Z, a-z, 0-9, +, / (64 chars) with near-equal frequencies.
+    Natural text uses ~60-80 distinct chars but with HEAVY clustering
+    around lowercase letters (e, t, a, o, i, n, s...).
+    
+    This function measures how "flat" the frequency distribution is.
+    Returns: 0.0 (highly peaked/natural) to 1.0 (perfectly flat/encoded).
+    
+    Reference: detect-secrets (https://github.com/Yelp/detect-secrets)
+    """
+    if len(text) < 10:
+        return 0.0
+
+    freq = {}
+    for c in text:
+        freq[c] = freq.get(c, 0) + 1
+
+    total = sum(freq.values())
+    n_unique = len(freq)
+
+    if n_unique < 2:
+        return 0.0
+
+    # Calculate coefficient of variation (CV) of frequencies
+    # Low CV = flat distribution (encoded), High CV = peaked (natural)
+    mean_freq = total / n_unique
+    variance = sum((f - mean_freq) ** 2 for f in freq.values()) / n_unique
+    std_dev = math.sqrt(variance)
+    cv = std_dev / mean_freq if mean_freq > 0 else 0
+
+    # Invert: flat distribution (low CV) → high score (suspicious)
+    # CV of 0 → score 1.0 (perfectly uniform)
+    # CV of 1+ → score ~0.0 (very peaked/natural)
+    flatness_score = max(0.0, 1.0 - cv)
+
+    return flatness_score
+
+
+def _is_encoded_payload(text: str) -> dict:
+    """
+    Multi-heuristic encoded payload detection.
+    
+    Runs 5 independent statistical tests. Only flags when ≥3 of 5 agree
+    that the data is likely encoded/encrypted. This eliminates false
+    positives from URLs, minified JS, hex colors, and long variable names.
+    
+    Returns dict with:
+      - is_suspicious: bool
+      - signals_triggered: int (0-5)
+      - details: dict with individual test results
+    """
+    results = {}
+    signals = 0
+
+    # Test 1: Shannon Entropy (Classic)
+    entropy = _shannon_entropy(text)
+    results["shannon_entropy"] = round(entropy, 3)
+    if entropy > 5.5:
+        signals += 1
+
+    # Test 2: Chi-Squared Uniformity (P-Value)
+    chi_p = _chi_squared_uniformity(text)
+    results["chi_squared_p_value"] = round(chi_p, 4)
+    if chi_p > 0.05:  # High p-value = uniform distribution = suspicious
+        signals += 1
+
+    # Test 3: Serial Correlation (SCC)
+    scc = _serial_correlation(text)
+    results["serial_correlation"] = round(scc, 4)
+    if abs(scc) < 0.15:  # Low correlation = random-looking = suspicious
+        signals += 1
+
+    # Test 4: Simpson's Diversity (D)
+    simpson = _simpsons_index(text)
+    results["simpsons_diversity"] = round(simpson, 4)
+    if simpson < 0.85: # Low diversity = suspicious (repetitive/obfuscated)
+        signals += 1
+
+    # Test 5: KL-Divergence (Relative Entropy)
+    kl_score = _kl_divergence(text)
+    results["kl_divergence"] = round(kl_score, 4)
+    if kl_score > 3.0: # High divergence from natural language = suspicious
+        signals += 1
+
+    results["signals_triggered"] = signals
+    results["is_suspicious"] = signals >= 3  # Require ≥3 tests to agree for high-precision blocking
+
+    return results
 
 def validate_llm_output(output_text: str) -> None:
     """
@@ -263,8 +518,8 @@ def validate_llm_output(output_text: str) -> None:
     
     Checks:
       1. Prompt Injection Detection — regex scan for known jailbreak patterns.
-      2. Secret Leak Detection — regex + Shannon entropy for API keys, passwords, 
-         and encoded payloads.
+      2. Secret Leak Detection — regex + multi-heuristic statistical analysis
+         for API keys, passwords, and encoded payloads.
       3. Code Safety Scan — if the output contains Python code blocks, run them 
          through the existing AST-based static_analysis_check.
       4. Structural Validation — if the output is JSON, validate and scan 
@@ -274,31 +529,36 @@ def validate_llm_output(output_text: str) -> None:
     """
     violations = []
 
-    # --- Check 1: Prompt Injection Detection ---
+    # Prompt Injection Detection
     for pattern in _INJECTION_PATTERNS:
         match = pattern.search(output_text)
         if match:
             violations.append(f"Prompt injection artifact detected: '{match.group()}'")
 
-    # --- Check 2: Secret/Credential Leak Detection ---
+    # Secret/Credential Leak Detection
     for pattern in _SECRET_PATTERNS:
         match = pattern.search(output_text)
         if match:
             redacted = match.group()[:10] + "...REDACTED"
             violations.append(f"Potential credential leak detected: '{redacted}'")
 
-    # Entropy check for encoded payloads
+    # Multi-heuristic encoded payload detection (replaces naive entropy-only check)
     for line in output_text.split('\n'):
         stripped = line.strip()
         if len(stripped) > 40:
-            entropy = _shannon_entropy(stripped)
-            if entropy > 5.5:  # English ~3.5-4.5; base64/encoded ~5.5+
+            analysis = _is_encoded_payload(stripped)
+            if analysis["is_suspicious"]:
                 violations.append(
-                    f"High-entropy line detected (entropy={entropy:.2f}), "
-                    f"possible encoded payload: '{stripped[:30]}...'"
+                    f"Encoded payload detected ({analysis['signals_triggered']}/5 signals): "
+                    f"entropy={analysis['shannon_entropy']}, "
+                    f"chi²_p={analysis['chi_squared_p_value']}, "
+                    f"SCC={analysis['serial_correlation']}, "
+                    f"simpson={analysis['simpsons_diversity']}, "
+                    f"kl={analysis['kl_divergence']} — "
+                    f"'{stripped[:30]}...'"
                 )
 
-    # --- Check 3: Code Safety Scan ---
+    # Code Safety Scan
     code_blocks = re.findall(r'```python\s*\n(.*?)```', output_text, re.DOTALL)
     if not code_blocks:
         code_blocks = re.findall(r'```\s*\n(.*?)```', output_text, re.DOTALL)
@@ -308,7 +568,7 @@ def validate_llm_output(output_text: str) -> None:
         except SecurityViolationException as e:
             violations.append(f"Embedded code failed AST safety scan: {str(e)}")
 
-    # --- Check 4: Structural Validation ---
+    # Structural Validation
     trimmed = output_text.strip()
     if trimmed.startswith('{') or trimmed.startswith('['):
         try:
@@ -323,7 +583,7 @@ def validate_llm_output(output_text: str) -> None:
         except json.JSONDecodeError:
             logging.warning("Output resembles JSON but failed to parse.")
 
-    # --- Verdict ---
+    # Final Verdict
     if violations:
         violation_summary = "; ".join(violations)
         logging.error(f"[OUTPUT FIREWALL] BLOCKED: {violation_summary}")
@@ -332,4 +592,3 @@ def validate_llm_output(output_text: str) -> None:
         )
     else:
         logging.info("[OUTPUT FIREWALL] Output passed all checks.")
-

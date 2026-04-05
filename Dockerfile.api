@@ -1,0 +1,24 @@
+FROM python:3.14-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir celery redis sqlalchemy psycopg2-binary fastapi uvicorn[standard] passlib[bcrypt] pyjwt pydantic python-multipart httpx crosshair-tool
+
+# Copy source code
+COPY . .
+
+# Environment setup
+ENV PYTHONPATH=/app
+
+# Default command for the API service
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
