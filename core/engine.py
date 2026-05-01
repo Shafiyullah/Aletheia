@@ -64,10 +64,15 @@ class AletheiaEngine:
         """
         Formal Verification using SMT Solvers (CrossHair/Z3).
         Proves exactly whether both implementations are behaviorally equivalent.
+
+        Each invocation creates a unique temporary directory to prevent race
+        conditions when multiple Celery workers run concurrently.
         """
         import tempfile
         import subprocess
         import os
+        import uuid
+        import shutil
 
         # Mathematical Upgrade: Static Type Discovery
         type_signature = self._infer_types(original_code)
@@ -93,7 +98,10 @@ class AletheiaEngine:
         4. Do NOT call them. Return ONLY the code block containing the two functions.
         """
         
-        env = os.environ.copy()
+        # Create a unique temp directory for this verification run
+        verify_dir = tempfile.mkdtemp(prefix="ale_verify_")
+        module_name = "_ale_verify"
+        tf_path = os.path.join(verify_dir, f"{module_name}.py")
         equiv = False
         
         try:
@@ -116,16 +124,13 @@ class AletheiaEngine:
                 # Fallback to raw code if AST parsing fails
                 sanitized_code = module_code
             
-            project_root = os.path.abspath(".")
-            module_fn = "_ale_verify.py"
-            tf_path = os.path.join(project_root, module_fn)
-            with open(tf_path, 'w') as f:
-                f.write(module_code)
-            
-            # Module name is the filename without .py
-            module_name = "_ale_verify"
+            with open(tf_path, 'w', encoding='utf-8') as f:
+                f.write(sanitized_code)  # Write sanitized code, not raw LLM output
             
             # Execute crosshair diffbehavior with a strict 5-second per-path execution limit
+            env = os.environ.copy()
+            env["PYTHONPATH"] = verify_dir + os.pathsep + env.get("PYTHONPATH", "")
+
             try:
                 cmd = [
                     sys.executable, "-m", "crosshair", "diffbehavior",
@@ -133,14 +138,11 @@ class AletheiaEngine:
                     "--per_path_timeout", "1"
                 ]
                 
-                # Still set PYTHONPATH for absolute robustness
-                env["PYTHONPATH"] = project_root + os.pathsep + env.get("PYTHONPATH", "")
-                
                 # Bounded total execution solver time
-                result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=5, cwd=project_root)
+                result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=5, cwd=verify_dir)
                 out = result.stdout + result.stderr
                 
-                if "No differences found" in out or "CrossHair explored" in out and "different" not in out:
+                if "No differences found" in out or ("CrossHair explored" in out and "different" not in out):
                     equiv = True
                 elif "different" in out.lower() or "exception" in out.lower() or result.returncode != 0:
                     logging.warning(f"Z3 Solver Equivalence Mismatch: {out[:300]}")

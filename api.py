@@ -1,19 +1,20 @@
 import os
 import json
 import logging
+import secrets
 from typing import Optional, Dict, Any, List
 from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import contextlib
 
 from core.database import engine, Base, get_db
 from core.models import User, AuditLog, VulnerabilityFinding
 from core.auth import verify_password, get_password_hash, create_access_token
 from core.engine import AletheiaEngine
-from core.config import GEMINI_API_KEY
+from core.config import GEMINI_API_KEY, ALLOWED_ORIGINS
 from core.safety import SecurityViolationException, validate_llm_output
 from core.worker import optimize_task, celery_app
 
@@ -26,11 +27,25 @@ Base.metadata.create_all(bind=engine)
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Setup initial admin user if DB is fresh
     db = next(get_db())
-    admin_user = db.query(User).filter(User.username == "enterprise_admin").first()
-    if not admin_user:
-        hashed_pw = get_password_hash(os.environ.get("ADMIN_PASSWORD", "secure_hyper_admin123!"))
+    try:
+        admin_user = db.query(User).filter(User.username == "enterprise_admin").first()
+        if not admin_user:
+            admin_password = os.environ.get("ADMIN_PASSWORD")
+            if not admin_password:
+                if os.environ.get("ENV", "").upper() == "PROD":
+                    raise ValueError(
+                        "CRITICAL: ADMIN_PASSWORD is not set in a production environment."
+                    )
+                # Non-production: generate a random password and log it once.
+                admin_password = secrets.token_urlsafe(20)
+                logger.warning(
+                    "ADMIN_PASSWORD not set. Generated ephemeral admin password: %s  "
+                    "(Set ADMIN_PASSWORD env var for persistent credentials)",
+                    admin_password,
+                )
+
+            hashed_pw = get_password_hash(admin_password)
         admin_user = User(
             username="enterprise_admin",
             email="admin@aletheia.local",
@@ -39,6 +54,8 @@ async def lifespan(app: FastAPI):
         )
         db.add(admin_user)
         db.commit()
+    finally:
+        db.close()
     yield
 
 app = FastAPI(
@@ -48,32 +65,37 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS definition to allow the decoupled Streamlit/React frontend to connect
+# CORS — Restricted to configured origins (defaults to http://localhost:8501)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In strict production this is limited to frontend IP
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# SCHEMAS
+# ─── SCHEMAS ────────────────────────────────────────────────────────
 
 class Token(BaseModel):
     access_token: str
     token_type: str
 
 class OptimizationRequest(BaseModel):
-    code: str
+    code: str = Field(..., max_length=50_000)  # Bounded input size
 
 class OptResponse(BaseModel):
     method: str
     code: str
 
+class AuditRequest(BaseModel):
+    claims: List[str] = Field(..., max_items=20)  # Bounded claim count
+    context: str = Field(..., max_length=50_000)
+
 # DEPENDENCIES
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",

@@ -3,6 +3,9 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Bool
 from sqlalchemy.orm import relationship
 from core.database import Base
 
+def _utcnow():
+    return datetime.datetime.now(datetime.timezone.utc)
+
 class User(Base):
     __tablename__ = "users"
 
@@ -12,7 +15,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
     is_superuser = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
     audits = relationship("AuditLog", back_populates="user")
 
@@ -25,7 +28,7 @@ class AuditLog(Base):
     action_type = Column(String(50), nullable=False)  # e.g., 'OPTIMIZE', 'AUDIT'
     target_data = Column(Text, nullable=False)        # Context/code or GitHub URL that was audited
     result_status = Column(String(20), nullable=False) # e.g., 'SUCCESS', 'BLOCKED'
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
     user = relationship("User", back_populates="audits")
     findings = relationship("VulnerabilityFinding", back_populates="audit")
@@ -39,6 +42,6 @@ class VulnerabilityFinding(Base):
     severity = Column(String(20), nullable=False)      # 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
     description = Column(Text, nullable=False)
     detector = Column(String(50), nullable=False)      # 'AST', 'Bandit', 'Shannon', 'AI_Sentinel'
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=_utcnow)
 
     audit = relationship("AuditLog", back_populates="findings")

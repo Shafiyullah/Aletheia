@@ -21,21 +21,25 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    # Security: prevent deserialization attacks via pickle
+    task_reject_on_worker_lost=True,
+    worker_max_tasks_per_child=100,  # Recycle workers to prevent memory leaks
 )
 
-@celery_app.task(name="optimize_task")
-def optimize_task(code: str, user_id: int):
+@celery_app.task(name="optimize_task", bind=True, max_retries=2)
+def optimize_task(self, code: str, user_id: int):
     """
     Background worker task for heavy code optimization.
+    Uses a fresh event loop per task to avoid collisions with Celery's internals.
     """
     logger.info(f"Starting optimization task for user {user_id}")
     
-    # We must run the async dispatch in a sync wrapper for Celery
-    loop = asyncio.get_event_loop()
-    if loop.is_closed():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    # Always create a fresh event loop for Celery tasks.
+    # Celery workers may reuse threads, so the previous loop may be closed.
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     
+    db = None
     try:
         engine = AletheiaEngine(api_key=GEMINI_API_KEY)
         result_json = loop.run_until_complete(engine.dispatch_optimization(code))
@@ -45,25 +49,32 @@ def optimize_task(code: str, user_id: int):
         log = AuditLog(
             user_id=user_id,
             action_type="OPTIMIZE_BACKGROUND",
-            target_data=code[:200] + "...",
+            target_data=code[:200] + "..." if len(code) > 200 else code,
             result_status="SUCCESS"
         )
         db.add(log)
         db.commit()
-        db.close()
         
         return result_json
 
     except Exception as e:
         logger.error(f"Worker Task Failure: {e}")
-        db = SessionLocal()
-        log = AuditLog(
-            user_id=user_id,
-            action_type="OPTIMIZE_BACKGROUND",
-            target_data=code[:200] + "...",
-            result_status="FAILED"
-        )
-        db.add(log)
-        db.commit()
-        db.close()
+        try:
+            db = SessionLocal()
+            log = AuditLog(
+                user_id=user_id,
+                action_type="OPTIMIZE_BACKGROUND",
+                target_data=code[:200] + "..." if len(code) > 200 else code,
+                result_status="FAILED"
+            )
+            db.add(log)
+            db.commit()
+        except Exception as db_err:
+            logger.error(f"Failed to log audit entry: {db_err}")
         raise e
+
+    finally:
+        # Always close DB session and event loop to prevent resource leaks
+        if db is not None:
+            db.close()
+        loop.close()

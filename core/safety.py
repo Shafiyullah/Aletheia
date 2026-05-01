@@ -13,33 +13,57 @@ from core.config import MODEL_FAST
 
 ALLOWED_LIBRARIES = {'numpy', 'pandas', 'jax', 'math', 'datetime', 'random', 'json', 're', 'collections', 'itertools', 'functools'}
 
+# Comprehensive ban lists — maintained centrally for consistency.
+_BANNED_MODULES = frozenset([
+    'os', 'sys', 'subprocess', 'shutil', 'pickle', 'socket', 'ctypes',
+    'signal', 'code', 'codeop', 'importlib', 'pty', 'webbrowser',
+    'http', 'urllib', 'xmlrpc', 'multiprocessing', 'threading',
+    'tempfile', 'pathlib', 'glob', 'io',
+])
+
+_BANNED_BUILTINS = frozenset([
+    'exec', 'eval', 'open', 'globals', 'locals', '__import__',
+    'getattr', 'setattr', 'delattr', 'breakpoint', 'compile',
+    'memoryview', 'type', 'vars', 'dir', 'help', 'input',
+])
+
+_BANNED_ATTRS = frozenset([
+    '__import__', '__subclasses__', '__bases__', '__mro__',
+    '__globals__', '__code__', '__builtins__', '__dict__',
+    '__class__', '__qualname__', '__reduce__', '__reduce_ex__',
+])
+
 class SecurityViolationException(Exception):
     """Raised when code violates security policies."""
     pass
 
 class SecurityVisitor(ast.NodeVisitor):
+    """AST-based security scanner with comprehensive ban lists."""
     def __init__(self):
         self.violations = []
 
     def visit_Import(self, node):
         for alias in node.names:
-            if alias.name in ['os', 'sys', 'subprocess', 'shutil', 'pickle']:
+            top_level = alias.name.split('.')[0]
+            if top_level in _BANNED_MODULES:
                 self.violations.append(f"Banned import: {alias.name}")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node):
-        if node.module in ['os', 'sys', 'subprocess', 'shutil', 'pickle']:
-            self.violations.append(f"Banned import from: {node.module}")
+        if node.module:
+            top_level = node.module.split('.')[0]
+            if top_level in _BANNED_MODULES:
+                self.violations.append(f"Banned import from: {node.module}")
         self.generic_visit(node)
 
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name):
-            if node.func.id in ['exec', 'eval', 'open', 'globals', 'locals', '__import__']:
+            if node.func.id in _BANNED_BUILTINS:
                 self.violations.append(f"Banned function call: {node.func.id}")
         self.generic_visit(node)
 
     def visit_Attribute(self, node):
-        if node.attr in ['__import__', '__subclasses__']:
+        if node.attr in _BANNED_ATTRS:
             self.violations.append(f"Banned attribute access: {node.attr}")
         self.generic_visit(node)
 
@@ -133,8 +157,18 @@ def validate_imports(code_str: str) -> Tuple[bool, Optional[str]]:
 
 def run_in_sandbox(code_str: str, global_vars: Optional[dict] = None) -> str:
     """
-    Executes code in a restricted environment and captures output.
+    Executes untrusted code in an isolated subprocess with strict resource limits.
+
+    Security layers (defense-in-depth):
+      0. Dependency whitelist check.
+      1. AST-based static analysis (banned imports, builtins, attributes).
+      2. AI Sentinel intent analysis.
+      3. Subprocess isolation — code is never exec()'d in the host process.
+         The subprocess runs with a 10-second hard timeout.
     """
+    import subprocess as _sp
+    import sys as _sys
+
     # 0. Dependency Check - Whitelist
     is_valid_deps, dep_error = validate_imports(code_str)
     if not is_valid_deps:
@@ -146,33 +180,35 @@ def run_in_sandbox(code_str: str, global_vars: Optional[dict] = None) -> str:
     # 2. AI Sentinel - Intent Analysis
     ai_security_check(code_str)
 
-    if global_vars is None:
-        global_vars = {}
-    
-    # Restrict builtins
-    safe_builtins = __builtins__.copy()
-    if isinstance(safe_builtins, dict):
-        # Already a dict in some environments
-        pass
-    else:
-        # Get from module if it's a module
-        import builtins
-        safe_builtins = builtins.__dict__.copy()
+    # 3. Subprocess Isolation — never exec() in-process
+    with tempfile.NamedTemporaryFile(
+        mode='w', suffix='.py', delete=False, encoding='utf-8'
+    ) as tf:
+        tf.write(code_str)
+        tf_path = tf.name
 
-    # Blacklist dangerous builtins
-    for b in ['open', 'eval', 'exec', '__import__', 'compile']:
-        safe_builtins.pop(b, None)
-
-    global_vars['__builtins__'] = safe_builtins
-
-    output = io.StringIO()
     try:
-        with contextlib.redirect_stdout(output):
-            exec(code_str, global_vars)
+        result = _sp.run(
+            [_sys.executable, tf_path],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            # Prevent the child from inheriting sensitive env vars
+            env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": ""},
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            return f"Execution Error: {stderr[:500]}"
+        return result.stdout
+    except _sp.TimeoutExpired:
+        return "Execution Error: Code exceeded 10-second time limit."
     except Exception as e:
         return f"Execution Error: {str(e)}"
-    
-    return output.getvalue()
+    finally:
+        try:
+            os.remove(tf_path)
+        except OSError:
+            pass
 
 def ai_security_check(code_str: str) -> None:
     """
