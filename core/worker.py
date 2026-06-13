@@ -21,9 +21,10 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    
     # Security: prevent deserialization attacks via pickle
     task_reject_on_worker_lost=True,
-    worker_max_tasks_per_child=100,  # Recycle workers to prevent memory leaks
+    worker_max_tasks_per_child=100,
 )
 
 @celery_app.task(name="optimize_task", bind=True, max_retries=2)
@@ -34,8 +35,6 @@ def optimize_task(self, code: str, user_id: int):
     """
     logger.info(f"Starting optimization task for user {user_id}")
     
-    # Always create a fresh event loop for Celery tasks.
-    # Celery workers may reuse threads, so the previous loop may be closed.
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
@@ -44,7 +43,6 @@ def optimize_task(self, code: str, user_id: int):
         engine = AletheiaEngine(api_key=GEMINI_API_KEY)
         result_json = loop.run_until_complete(engine.dispatch_optimization(code))
         
-        # Persist success to DB
         db = SessionLocal()
         log = AuditLog(
             user_id=user_id,

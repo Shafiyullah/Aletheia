@@ -137,10 +137,24 @@ if navigation == "Prometheus: Hyper-Optimize":
 
 elif navigation == "Veritas: Audit Claims":
     st.title("⚖️ VERITAS // TRUTH SCOPE")
-    st.warning("Veritas module requires PDF parsing hooks (Enterprise OCR). Currently auditing raw claims.")
+    
+    uploaded_file = st.file_uploader("Upload PDF Paper to Audit", type=["pdf"])
+    extracted_text = "Google Research (2024) demonstrated JAX speedups."
+    
+    if uploaded_file is not None:
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(uploaded_file)
+            extracted_text = ""
+            for page in reader.pages:
+                extracted_text += page.extract_text() + "\n"
+            st.success(f"PDF processed: {len(extracted_text)} characters extracted.")
+            add_log(f"PDF processed: {uploaded_file.name}")
+        except Exception as e:
+            st.error(f"Error parsing PDF: {e}")
     
     claim = st.text_input("Enter Claim to Verify", value="JAX provides 100x speedup for gradient descent.")
-    context = st.text_area("Source Context", value="Google Research (2024) demonstrated JAX speedups.")
+    context = st.text_area("Source Context", value=extracted_text, height=150)
     
     if st.button("AUDIT CLAIM"):
         add_log(f"Auditing claim: {claim[:30]}...")

@@ -181,20 +181,22 @@ def run_in_sandbox(code_str: str, global_vars: Optional[dict] = None) -> str:
     ai_security_check(code_str)
 
     # 3. Subprocess Isolation — never exec() in-process
-    with tempfile.NamedTemporaryFile(
-        mode='w', suffix='.py', delete=False, encoding='utf-8'
-    ) as tf:
-        tf.write(code_str)
-        tf_path = tf.name
+    # Create an empty, isolated working directory so the script cannot read local .env or source files
+    sandbox_dir = tempfile.mkdtemp(prefix="ale_sandbox_")
+    tf_path = os.path.join(sandbox_dir, "script.py")
+    with open(tf_path, 'w', encoding='utf-8') as f:
+        f.write(code_str)
 
     try:
+        # Run with -I (Isolated mode): ignores PYTHONPATH, user site-packages, and ignores current directory for sys.path
         result = _sp.run(
-            [_sys.executable, tf_path],
+            [_sys.executable, "-I", tf_path],
             capture_output=True,
             text=True,
             timeout=10,
-            # Prevent the child from inheriting sensitive env vars
-            env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": ""},
+            cwd=sandbox_dir,
+            # Pass an empty environment to completely hide GEMINI_API_KEY and other secrets
+            env={},
         )
         if result.returncode != 0:
             stderr = result.stderr.strip()
@@ -206,7 +208,8 @@ def run_in_sandbox(code_str: str, global_vars: Optional[dict] = None) -> str:
         return f"Execution Error: {str(e)}"
     finally:
         try:
-            os.remove(tf_path)
+            import shutil
+            shutil.rmtree(sandbox_dir, ignore_errors=True)
         except OSError:
             pass
 

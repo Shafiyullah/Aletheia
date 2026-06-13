@@ -13,21 +13,13 @@ except ImportError:
 
 logger = logging.getLogger("aletheia.auth")
 
-# Enterprise security parameters
-# JWT_SECRET MUST be set in production via environment variable.
+# Security parameters
 SECRET_KEY = os.environ.get("ALETHEIA_SECRET_KEY")
 if not SECRET_KEY:
-    if os.environ.get("ENV", "").upper() == "PROD":
-        raise ValueError(
-            "CRITICAL: ALETHEIA_SECRET_KEY is not set in a production environment. "
-            "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
-        )
-    # In non-production, generate a random ephemeral key per process.
-    # This means tokens are invalidated on restart — acceptable for dev/CI.
-    SECRET_KEY = secrets.token_urlsafe(64)
-    logger.warning(
-        "ALETHEIA_SECRET_KEY not set. Using ephemeral random key. "
-        "Tokens will NOT survive restarts. Set a persistent key for staging/production."
+    raise ValueError(
+        "CRITICAL: ALETHEIA_SECRET_KEY must be set in the environment. "
+        "Asecure Zero-Trust system requires a secure secret key. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
     )
 
 ALGORITHM = "HS256"

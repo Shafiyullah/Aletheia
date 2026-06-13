@@ -13,14 +13,14 @@ ALLOWED_ORIGINS = [
 # MODEL TIER DEFINITIONS
 
 # TIER 1: THE SCANNER 
-MODEL_FAST = "gemini-3-pro-preview"
+MODEL_FAST = "gemini-3.1-pro-preview"
 
 # Tier 2: 
-MODEL_SMART = "gemini-3-pro-preview"
+MODEL_SMART = "gemini-3.1-pro-preview"
 
 # Tier 3: 
-MODEL_THINKING = "gemini-3-pro-preview" 
+MODEL_THINKING = "gemini-3.1-pro-preview" 
 
 # Tier 4: SPECIALIZED AGENTS
-MODEL_CLASSIFY = "gemini-3-pro-preview"
-MODEL_VISION = "gemini-3-pro-preview"
+MODEL_CLASSIFY = "gemini-3.1-pro-preview"
+MODEL_VISION = "gemini-3.1-pro-preview"

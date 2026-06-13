@@ -77,57 +77,33 @@ class AletheiaEngine:
         # Mathematical Upgrade: Static Type Discovery
         type_signature = self._infer_types(original_code)
         
-        prompt = f"""
-        ### ROLE: Formal Verification Engineer
-        ### TASK: Extract these two code snippets into purely self-contained, deterministic Python functions with matching type signatures.
-        
-        ### ORIGINAL CODE:
-        ```python
-        {original_code}
-        ```
-        
-        ### OPTIMIZED CODE:
-        ```python
-        {optimized_code}
-        ```
-        
-        ### INSTRUCTIONS:
-        1. Write `def func_original({type_signature}) -> Any:` matching the logical types.
-        2. Write `def func_optimized({type_signature}) -> Any:` matching exactly.
-        3. BOTH functions must be deterministic and fully deep-copyable.
-        4. Do NOT call them. Return ONLY the code block containing the two functions.
-        """
-        
-        # Create a unique temp directory for this verification run
+        # Deterministic Code Wrapper for formal verification (No LLM required)
         verify_dir = tempfile.mkdtemp(prefix="ale_verify_")
         module_name = "_ale_verify"
         tf_path = os.path.join(verify_dir, f"{module_name}.py")
         equiv = False
         
         try:
-            if not self.client: return True # Bypass if keys aren't loaded
+            # Indent code to place inside function blocks
+            def indent_code(code_str: str) -> str:
+                return "\n".join("    " + line for line in code_str.strip().split("\n"))
+                
+            sanitized_code = f"""
+import jax.numpy as jnp
+import numpy as np
+import math
+from typing import *
 
-            response = await self.client.aio.models.generate_content(
-                model=MODEL_FAST,
-                contents=prompt
-            )
-            module_code = extract_code(response.text)
-            
-            # Sanitize code using AST to remove side-effects.
-            import ast
-            try:
-                tree = ast.parse(module_code)
-                # Keep only function definitions
-                tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
-                sanitized_code = ast.unparse(tree)
-            except Exception:
-                # Fallback to raw code if AST parsing fails
-                sanitized_code = module_code
-            
+def func_original({type_signature}):
+{indent_code(original_code)}
+
+def func_optimized({type_signature}):
+{indent_code(optimized_code)}
+"""
             with open(tf_path, 'w', encoding='utf-8') as f:
-                f.write(sanitized_code)  # Write sanitized code, not raw LLM output
+                f.write(sanitized_code)
             
-            # Execute crosshair diffbehavior with a strict 5-second per-path execution limit
+            # Execute crosshair diffbehavior with a strict timeout
             env = os.environ.copy()
             env["PYTHONPATH"] = verify_dir + os.pathsep + env.get("PYTHONPATH", "")
 
@@ -138,8 +114,8 @@ class AletheiaEngine:
                     "--per_path_timeout", "1"
                 ]
                 
-                # Bounded total execution solver time
-                result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=5, cwd=verify_dir)
+                # Bounded total execution solver time (increased to 10s for stability)
+                result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=10, cwd=verify_dir)
                 out = result.stdout + result.stderr
                 
                 if "No differences found" in out or ("CrossHair explored" in out and "different" not in out):
